@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from data.fetcher import get_energy_data, get_weather_data, get_all_energy_data, get_all_cities_weather
 from data.parser import parse_energy_xml
+from ml.forecaster import get_next_24hr_forecast
 import os
 
 load_dotenv()
@@ -20,7 +21,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Country codes
 COUNTRY_CODES = {
     "germany": "10Y1001A1001A83F",
     "france": "10YFR-RTE------C",
@@ -28,7 +28,6 @@ COUNTRY_CODES = {
     "poland": "10YPL-AREA-----S",
 }
 
-# City coordinates
 CITY_COORDS = {
     "berlin": {"latitude": 52.52, "longitude": 13.41},
     "paris": {"latitude": 48.85, "longitude": 2.35},
@@ -49,35 +48,21 @@ def health():
 
 @app.get("/energy/{country}")
 def get_country_energy(country: str):
-    """
-    Ek specific country ka live energy data do
-    Example: /energy/germany
-    """
     country = country.lower()
-
     if country not in COUNTRY_CODES:
         raise HTTPException(
             status_code=404,
             detail=f"Country '{country}' not found. Available: {list(COUNTRY_CODES.keys())}"
         )
-
     raw = get_energy_data(country.capitalize(), COUNTRY_CODES[country])
-
     if raw["status"] != "success":
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch data for {country}"
-        )
-
+        raise HTTPException(status_code=500, detail=f"Failed to fetch data for {country}")
     parsed = parse_energy_xml(raw["raw_xml"], country.capitalize())
     return parsed
 
 
 @app.get("/energy")
 def get_all_energy():
-    """
-    Saare countries ka live energy data do
-    """
     results = []
     for country, code in COUNTRY_CODES.items():
         raw = get_energy_data(country.capitalize(), code)
@@ -89,18 +74,12 @@ def get_all_energy():
 
 @app.get("/weather/{city}")
 def get_city_weather(city: str):
-    """
-    Ek specific city ka weather data do
-    Example: /weather/berlin
-    """
     city = city.lower()
-
     if city not in CITY_COORDS:
         raise HTTPException(
             status_code=404,
             detail=f"City '{city}' not found. Available: {list(CITY_COORDS.keys())}"
         )
-
     coords = CITY_COORDS[city]
     data = get_weather_data(
         latitude=coords["latitude"],
@@ -112,7 +91,15 @@ def get_city_weather(city: str):
 
 @app.get("/weather")
 def get_all_weather():
-    """
-    Saari cities ka weather data do
-    """
     return get_all_cities_weather()
+
+
+@app.get("/forecast")
+def get_forecast():
+    """
+    Next 24hr energy consumption forecast — Prophet ML model
+    """
+    result = get_next_24hr_forecast()
+    if result["status"] != "success":
+        raise HTTPException(status_code=500, detail="Forecast model error")
+    return result
