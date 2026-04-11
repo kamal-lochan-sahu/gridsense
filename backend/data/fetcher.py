@@ -50,7 +50,7 @@ def get_energy_data(country: str, country_code: str):
             "country": country,
             "status": "success",
             "data_length": len(response.text),
-            "raw_xml": response.text[:500]
+            "raw_xml": response.text
         }
     else:
         return {
