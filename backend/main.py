@@ -14,9 +14,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
+origins = [
+    "https://gridsense-eight.vercel.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -96,9 +103,6 @@ def get_all_weather():
 
 @app.get("/forecast")
 def get_forecast():
-    """
-    Next 24hr energy consumption forecast — Prophet ML model
-    """
     result = get_next_24hr_forecast()
     if result["status"] != "success":
         raise HTTPException(status_code=500, detail="Forecast model error")
