@@ -32,6 +32,21 @@ interface WeatherData {
   cloudcover: number[];
 }
 
+interface ForecastPoint {
+  ds: string;
+  yhat: number;
+  yhat_lower: number;
+  yhat_upper: number;
+}
+
+interface ForecastData {
+  status: string;
+  country: string;
+  model: string;
+  total_predictions: number;
+  predictions: ForecastPoint[];
+}
+
 const API_URL = "https://gridsense-backend-k8pa.onrender.com";
 
 function SplashScreen() {
@@ -49,19 +64,14 @@ function SplashScreen() {
     const interval = setInterval(() => {
       step++;
       setProgress((step / messages.length) * 100);
-      if (step < messages.length) {
-        setText(messages[step]);
-      }
-      if (step >= messages.length) {
-        clearInterval(interval);
-      }
+      if (step < messages.length) setText(messages[step]);
+      if (step >= messages.length) clearInterval(interval);
     }, 600);
     return () => clearInterval(interval);
   }, []);
 
   return (
     <div className="fixed inset-0 bg-gray-950 flex flex-col items-center justify-center z-50">
-      {/* Logo */}
       <div className="mb-8 flex flex-col items-center">
         <div className="text-6xl mb-4 animate-bounce">⚡</div>
         <h1 className="text-4xl font-bold text-green-400 tracking-widest">
@@ -71,8 +81,6 @@ function SplashScreen() {
           REAL-TIME ENERGY INTELLIGENCE
         </p>
       </div>
-
-      {/* Progress Bar */}
       <div className="w-64 mt-8">
         <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
           <div
@@ -89,15 +97,13 @@ function SplashScreen() {
 export default function Home() {
   const [energyData, setEnergyData] = useState<EnergyData[]>([]);
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
+  const [forecastData, setForecastData] = useState<ForecastData | null>(null);
   const [selectedCountry, setSelectedCountry] = useState("germany");
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
-    // Splash screen 2.5 seconds dikhao
-    const splashTimer = setTimeout(() => {
-      setShowSplash(false);
-    }, 2500);
+    const splashTimer = setTimeout(() => setShowSplash(false), 2500);
     fetchAllData();
     return () => clearTimeout(splashTimer);
   }, []);
@@ -105,14 +111,17 @@ export default function Home() {
   const fetchAllData = async () => {
     setLoading(true);
     try {
-      const [energyRes, weatherRes] = await Promise.all([
+      const [energyRes, weatherRes, forecastRes] = await Promise.all([
         fetch(`${API_URL}/energy`),
         fetch(`${API_URL}/weather`),
+        fetch(`${API_URL}/forecast`),
       ]);
       const energy = await energyRes.json();
       const weather = await weatherRes.json();
+      const forecast = await forecastRes.json();
       setEnergyData(energy);
       setWeatherData(weather);
+      setForecastData(forecast);
     } catch (error) {
       console.error("Error fetching data:", error);
     }
@@ -128,9 +137,14 @@ export default function Home() {
     load_mw: Math.round(load),
   }));
 
-  if (showSplash) {
-    return <SplashScreen />;
-  }
+  const forecastChartData = forecastData?.predictions.map((p) => ({
+    time: p.ds.split(" ")[1]?.slice(0, 5) || p.ds,
+    predicted: Math.round(p.yhat),
+    upper: Math.round(p.yhat_upper),
+    lower: Math.round(p.yhat_lower),
+  }));
+
+  if (showSplash) return <SplashScreen />;
 
   return (
     <main className="min-h-screen bg-gray-950 text-white p-6">
@@ -222,6 +236,59 @@ export default function Home() {
                   {Math.round(selectedEnergy.min_load_mw).toLocaleString()} MW
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* Forecast Chart */}
+          {forecastChartData && (
+            <div className="bg-gray-900 rounded-xl p-6 mb-8 border border-purple-800">
+              <h2 className="text-lg font-semibold mb-1 text-purple-400">
+                🤖 ML Forecast — Germany Next 24hr (Prophet Model)
+              </h2>
+              <p className="text-gray-500 text-xs mb-4">
+                Predicted energy consumption based on historical patterns
+              </p>
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={forecastChartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="time" stroke="#9CA3AF" />
+                  <YAxis stroke="#9CA3AF" />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#1F2937",
+                      border: "1px solid #374151",
+                      borderRadius: "8px",
+                    }}
+                  />
+                  <Legend />
+                  <Line
+                    type="monotone"
+                    dataKey="predicted"
+                    stroke="#A855F7"
+                    strokeWidth={2}
+                    dot={false}
+                    name="Predicted (MW)"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="upper"
+                    stroke="#6B21A8"
+                    strokeWidth={1}
+                    dot={false}
+                    strokeDasharray="4 4"
+                    name="Upper Bound"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="lower"
+                    stroke="#6B21A8"
+                    strokeWidth={1}
+                    dot={false}
+                    strokeDasharray="4 4"
+                    name="Lower Bound"
+                  />
+                </LineChart>
+              </ResponsiveContainer>
             </div>
           )}
 
