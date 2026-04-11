@@ -33,9 +33,7 @@ interface WeatherData {
   cloudcover: number[];
 }
 
-const COUNTRIES = ["germany", "france", "spain", "poland"];
-const CITIES = ["berlin", "paris", "madrid", "warsaw"];
-const API_URL = "http://127.0.0.1:8000";
+const API_URL = "https://gridsense-backend-k8pa.onrender.com";
 
 export default function Home() {
   const [energyData, setEnergyData] = useState<EnergyData[]>([]);
@@ -64,12 +62,10 @@ export default function Home() {
     setLoading(false);
   };
 
-  // Selected country ka data nikalo
   const selectedEnergy = energyData.find(
     (d) => d.country.toLowerCase() === selectedCountry
   );
 
-  // Chart ke liye data prepare karo
   const chartData = selectedEnergy?.all_loads.slice(-24).map((load, i) => ({
     hour: `${i + 1}h`,
     load_mw: Math.round(load),
