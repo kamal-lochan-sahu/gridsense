@@ -58,13 +58,16 @@ def get_energy_data(country: str, country_code: str):
 
 def get_weather_data(latitude: float, longitude: float, city: str):
     try:
-        url = (
-            f"{WEATHER_URL}?"
-            f"latitude={latitude}&longitude={longitude}"
-            f"&hourly=temperature_2m,windspeed_10m,cloudcover"
-            f"&forecast_days=2&timezone=Europe%2FBerlin"
-        )
-        response = requests.get(url)
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "hourly": "temperature_2m,windspeed_10m,cloudcover",
+            "forecast_days": 2,
+            "timezone": "Europe/Berlin"
+        }
+        response = requests.get(WEATHER_URL, params=params)
+        print(f"Weather API status: {response.status_code}")
+        print(f"Weather API response: {response.text[:500]}")
         data = response.json()
 
         hourly = data.get("hourly", {})
@@ -77,6 +80,7 @@ def get_weather_data(latitude: float, longitude: float, city: str):
             "cloudcover": hourly.get("cloudcover", [0])
         }
     except Exception as e:
+        print(f"Weather error for {city}: {str(e)}")
         return {
             "city": city,
             "timezone": "Europe/Berlin",
