@@ -12,7 +12,6 @@ import {
   Legend,
 } from "recharts";
 
-// Types
 interface EnergyData {
   country: string;
   status: string;
@@ -35,14 +34,72 @@ interface WeatherData {
 
 const API_URL = "https://gridsense-backend-k8pa.onrender.com";
 
+function SplashScreen() {
+  const [progress, setProgress] = useState(0);
+  const [text, setText] = useState("Connecting to European grid...");
+
+  useEffect(() => {
+    const messages = [
+      "Connecting to European grid...",
+      "Fetching live energy data...",
+      "Loading weather systems...",
+      "Preparing dashboard...",
+    ];
+    let step = 0;
+    const interval = setInterval(() => {
+      step++;
+      setProgress((step / messages.length) * 100);
+      if (step < messages.length) {
+        setText(messages[step]);
+      }
+      if (step >= messages.length) {
+        clearInterval(interval);
+      }
+    }, 600);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="fixed inset-0 bg-gray-950 flex flex-col items-center justify-center z-50">
+      {/* Logo */}
+      <div className="mb-8 flex flex-col items-center">
+        <div className="text-6xl mb-4 animate-bounce">⚡</div>
+        <h1 className="text-4xl font-bold text-green-400 tracking-widest">
+          GRIDSENSE
+        </h1>
+        <p className="text-gray-500 text-sm mt-2 tracking-wider">
+          REAL-TIME ENERGY INTELLIGENCE
+        </p>
+      </div>
+
+      {/* Progress Bar */}
+      <div className="w-64 mt-8">
+        <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-green-400 rounded-full transition-all duration-500"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="text-gray-500 text-xs mt-3 text-center">{text}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function Home() {
   const [energyData, setEnergyData] = useState<EnergyData[]>([]);
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [selectedCountry, setSelectedCountry] = useState("germany");
   const [loading, setLoading] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
+    // Splash screen 2.5 seconds dikhao
+    const splashTimer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2500);
     fetchAllData();
+    return () => clearTimeout(splashTimer);
   }, []);
 
   const fetchAllData = async () => {
@@ -70,6 +127,10 @@ export default function Home() {
     hour: `${i + 1}h`,
     load_mw: Math.round(load),
   }));
+
+  if (showSplash) {
+    return <SplashScreen />;
+  }
 
   return (
     <main className="min-h-screen bg-gray-950 text-white p-6">
