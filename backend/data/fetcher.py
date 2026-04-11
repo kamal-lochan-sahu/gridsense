@@ -9,7 +9,6 @@ ENTSOE_API_KEY = os.getenv("ENTSOE_API_KEY")
 ENTSOE_BASE_URL = "https://web-api.tp.entsoe.eu/api"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
 
-# European countries aur unke ENTSO-E codes
 COUNTRY_CODES = {
     "Germany": "10Y1001A1001A83F",
     "France": "10YFR-RTE------C",
@@ -17,7 +16,6 @@ COUNTRY_CODES = {
     "Poland": "10YPL-AREA-----S",
 }
 
-# Weather cities
 EUROPEAN_CITIES = [
     {"city": "Berlin", "latitude": 52.52, "longitude": 13.41},
     {"city": "Paris", "latitude": 48.85, "longitude": 2.35},
@@ -27,9 +25,6 @@ EUROPEAN_CITIES = [
 
 
 def get_energy_data(country: str, country_code: str):
-    """
-    ENTSO-E se ek country ka live electricity load data fetch karo
-    """
     now = datetime.utcnow()
     start = (now - timedelta(hours=24)).strftime("%Y%m%d%H00")
     end = now.strftime("%Y%m%d%H00")
@@ -62,9 +57,6 @@ def get_energy_data(country: str, country_code: str):
 
 
 def get_weather_data(latitude: float, longitude: float, city: str):
-    """
-    Open-Meteo se weather data fetch karo
-    """
     params = {
         "latitude": latitude,
         "longitude": longitude,
@@ -73,23 +65,30 @@ def get_weather_data(latitude: float, longitude: float, city: str):
         "timezone": "Europe/Berlin"
     }
 
-    response = requests.get(WEATHER_URL, params=params)
-    data = response.json()
+    try:
+        response = requests.get(WEATHER_URL, params=params)
+        data = response.json()
 
-    return {
-        "city": city,
-        "timezone": data["timezone"],
-        "hourly_time": data["hourly"]["time"],
-        "temperature": data["hourly"]["temperature_2m"],
-        "windspeed": data["hourly"]["windspeed_10m"],
-        "cloudcover": data["hourly"]["cloudcover"]
-    }
+        return {
+            "city": city,
+            "timezone": data.get("timezone", "Europe/Berlin"),
+            "hourly_time": data.get("hourly", {}).get("time", []),
+            "temperature": data.get("hourly", {}).get("temperature_2m", []),
+            "windspeed": data.get("hourly", {}).get("windspeed_10m", []),
+            "cloudcover": data.get("hourly", {}).get("cloudcover", [])
+        }
+    except Exception as e:
+        return {
+            "city": city,
+            "timezone": "Europe/Berlin",
+            "hourly_time": [],
+            "temperature": [0],
+            "windspeed": [0],
+            "cloudcover": [0]
+        }
 
 
 def get_all_energy_data():
-    """
-    Saare countries ka energy data fetch karo
-    """
     results = []
     for country, code in COUNTRY_CODES.items():
         data = get_energy_data(country, code)
@@ -99,9 +98,6 @@ def get_all_energy_data():
 
 
 def get_all_cities_weather():
-    """
-    Saari cities ka weather fetch karo
-    """
     results = []
     for city_info in EUROPEAN_CITIES:
         data = get_weather_data(
