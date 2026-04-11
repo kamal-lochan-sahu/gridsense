@@ -1,65 +1,200 @@
-import Image from "next/image";
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
+
+// Types
+interface EnergyData {
+  country: string;
+  status: string;
+  total_points: number;
+  latest_load_mw: number;
+  max_load_mw: number;
+  min_load_mw: number;
+  avg_load_mw: number;
+  all_loads: number[];
+}
+
+interface WeatherData {
+  city: string;
+  timezone: string;
+  hourly_time: string[];
+  temperature: number[];
+  windspeed: number[];
+  cloudcover: number[];
+}
+
+const COUNTRIES = ["germany", "france", "spain", "poland"];
+const CITIES = ["berlin", "paris", "madrid", "warsaw"];
+const API_URL = "http://127.0.0.1:8000";
 
 export default function Home() {
+  const [energyData, setEnergyData] = useState<EnergyData[]>([]);
+  const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
+  const [selectedCountry, setSelectedCountry] = useState("germany");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchAllData();
+  }, []);
+
+  const fetchAllData = async () => {
+    setLoading(true);
+    try {
+      const [energyRes, weatherRes] = await Promise.all([
+        fetch(`${API_URL}/energy`),
+        fetch(`${API_URL}/weather`),
+      ]);
+      const energy = await energyRes.json();
+      const weather = await weatherRes.json();
+      setEnergyData(energy);
+      setWeatherData(weather);
+    } catch (error) {
+      console.error("Error fetching data:", error);
+    }
+    setLoading(false);
+  };
+
+  // Selected country ka data nikalo
+  const selectedEnergy = energyData.find(
+    (d) => d.country.toLowerCase() === selectedCountry
+  );
+
+  // Chart ke liye data prepare karo
+  const chartData = selectedEnergy?.all_loads.slice(-24).map((load, i) => ({
+    hour: `${i + 1}h`,
+    load_mw: Math.round(load),
+  }));
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <main className="min-h-screen bg-gray-950 text-white p-6">
+      {/* Header */}
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold text-green-400">⚡ GridSense</h1>
+        <p className="text-gray-400 mt-1">
+          Real-Time Industrial Energy Intelligence Platform
+        </p>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center h-64">
+          <p className="text-gray-400 text-xl">Loading live data...</p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      ) : (
+        <>
+          {/* Energy Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+            {energyData.map((country) => (
+              <div
+                key={country.country}
+                onClick={() =>
+                  setSelectedCountry(country.country.toLowerCase())
+                }
+                className={`p-4 rounded-xl cursor-pointer border transition-all ${
+                  selectedCountry === country.country.toLowerCase()
+                    ? "border-green-400 bg-gray-800"
+                    : "border-gray-700 bg-gray-900 hover:border-gray-500"
+                }`}
+              >
+                <p className="text-gray-400 text-sm">{country.country}</p>
+                <p className="text-2xl font-bold text-white mt-1">
+                  {Math.round(country.latest_load_mw).toLocaleString()}
+                </p>
+                <p className="text-green-400 text-xs mt-1">MW — Live</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Energy Chart */}
+          <div className="bg-gray-900 rounded-xl p-6 mb-8 border border-gray-700">
+            <h2 className="text-lg font-semibold mb-4 text-green-400">
+              ⚡ {selectedCountry.toUpperCase()} — Last 24hr Energy Load (MW)
+            </h2>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis dataKey="hour" stroke="#9CA3AF" />
+                <YAxis stroke="#9CA3AF" />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "#1F2937",
+                    border: "1px solid #374151",
+                    borderRadius: "8px",
+                  }}
+                />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="load_mw"
+                  stroke="#4ADE80"
+                  strokeWidth={2}
+                  dot={false}
+                  name="Load (MW)"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Stats Row */}
+          {selectedEnergy && (
+            <div className="grid grid-cols-3 gap-4 mb-8">
+              <div className="bg-gray-900 rounded-xl p-4 border border-gray-700">
+                <p className="text-gray-400 text-sm">Max Load</p>
+                <p className="text-xl font-bold text-red-400">
+                  {Math.round(selectedEnergy.max_load_mw).toLocaleString()} MW
+                </p>
+              </div>
+              <div className="bg-gray-900 rounded-xl p-4 border border-gray-700">
+                <p className="text-gray-400 text-sm">Avg Load</p>
+                <p className="text-xl font-bold text-yellow-400">
+                  {Math.round(selectedEnergy.avg_load_mw).toLocaleString()} MW
+                </p>
+              </div>
+              <div className="bg-gray-900 rounded-xl p-4 border border-gray-700">
+                <p className="text-gray-400 text-sm">Min Load</p>
+                <p className="text-xl font-bold text-green-400">
+                  {Math.round(selectedEnergy.min_load_mw).toLocaleString()} MW
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Weather Cards */}
+          <div className="bg-gray-900 rounded-xl p-6 border border-gray-700">
+            <h2 className="text-lg font-semibold mb-4 text-blue-400">
+              🌤️ Live Weather — European Cities
+            </h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {weatherData.map((city) => (
+                <div
+                  key={city.city}
+                  className="bg-gray-800 rounded-lg p-4 border border-gray-700"
+                >
+                  <p className="text-gray-400 text-sm">{city.city}</p>
+                  <p className="text-2xl font-bold text-white mt-1">
+                    {city.temperature[0]}°C
+                  </p>
+                  <p className="text-blue-400 text-xs mt-1">
+                    💨 {city.windspeed[0]} km/h
+                  </p>
+                  <p className="text-gray-400 text-xs mt-1">
+                    ☁️ {city.cloudcover[0]}%
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+    </main>
   );
 }
