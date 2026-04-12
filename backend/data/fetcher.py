@@ -66,9 +66,17 @@ def get_weather_data(latitude: float, longitude: float, city: str):
             "timezone": "Europe/Berlin"
         }
         response = requests.get(WEATHER_URL, params=params)
-        print(f"Weather API status: {response.status_code}")
-        print(f"Weather API response: {response.text[:500]}")
         data = response.json()
+
+        if data.get("error"):
+            return {
+                "city": city,
+                "timezone": "Europe/Berlin",
+                "hourly_time": [],
+                "temperature": [0],
+                "windspeed": [0],
+                "cloudcover": [0]
+            }
 
         hourly = data.get("hourly", {})
         return {
@@ -80,7 +88,6 @@ def get_weather_data(latitude: float, longitude: float, city: str):
             "cloudcover": hourly.get("cloudcover", [0])
         }
     except Exception as e:
-        print(f"Weather error for {city}: {str(e)}")
         return {
             "city": city,
             "timezone": "Europe/Berlin",
@@ -96,7 +103,6 @@ def get_all_energy_data():
     for country, code in COUNTRY_CODES.items():
         data = get_energy_data(country, code)
         results.append(data)
-        print(f"⚡ {country}: {data['status']}")
     return results
 
 
@@ -109,7 +115,6 @@ def get_all_cities_weather():
             city=city_info["city"]
         )
         results.append(data)
-        print(f"🌤️ {city_info['city']} weather fetched")
     return results
 
 
@@ -123,8 +128,6 @@ if __name__ == "__main__":
     print("\n📊 Sample — Germany Energy:")
     germany = energy_data[0]
     print(f"Status: {germany['status']}")
-    if germany['status'] == 'success':
-        print(f"Data received: {germany['data_length']} bytes")
 
     print("\n📊 Sample — Berlin Weather:")
     berlin = weather_data[0]
