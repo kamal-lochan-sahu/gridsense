@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   LineChart,
   Line,
@@ -48,6 +48,7 @@ interface ForecastData {
 }
 
 const API_URL = "https://gridsense-backend-k8pa.onrender.com";
+const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
 function SplashScreen() {
   const [progress, setProgress] = useState(0);
@@ -101,15 +102,13 @@ export default function Home() {
   const [selectedCountry, setSelectedCountry] = useState("germany");
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState<string>("");
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    const splashTimer = setTimeout(() => setShowSplash(false), 2500);
-    fetchAllData();
-    return () => clearTimeout(splashTimer);
-  }, []);
+  const fetchAllData = useCallback(async (isRefresh = false) => {
+    if (isRefresh) setRefreshing(true);
+    else setLoading(true);
 
-  const fetchAllData = async () => {
-    setLoading(true);
     try {
       const [energyRes, weatherRes, forecastRes] = await Promise.all([
         fetch(`${API_URL}/energy`),
@@ -122,11 +121,29 @@ export default function Home() {
       setEnergyData(energy);
       setWeatherData(weather);
       setForecastData(forecast);
+      setLastUpdated(new Date().toLocaleTimeString());
     } catch (error) {
       console.error("Error fetching data:", error);
     }
-    setLoading(false);
-  };
+
+    if (isRefresh) setRefreshing(false);
+    else setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const splashTimer = setTimeout(() => setShowSplash(false), 2500);
+    fetchAllData();
+
+    // Auto refresh every 5 minutes
+    const refreshTimer = setInterval(() => {
+      fetchAllData(true);
+    }, REFRESH_INTERVAL);
+
+    return () => {
+      clearTimeout(splashTimer);
+      clearInterval(refreshTimer);
+    };
+  }, [fetchAllData]);
 
   const selectedEnergy = energyData.find(
     (d) => d.country.toLowerCase() === selectedCountry
@@ -138,7 +155,7 @@ export default function Home() {
   }));
 
   const forecastChartData = forecastData?.predictions.map((p) => ({
-    time: p.ds.split(" ")[1]?.slice(0, 5) || p.ds,
+    time: p.ds.slice(11, 16),
     predicted: Math.round(p.yhat),
     upper: Math.round(p.yhat_upper),
     lower: Math.round(p.yhat_lower),
@@ -147,13 +164,31 @@ export default function Home() {
   if (showSplash) return <SplashScreen />;
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white p-6">
+    <main className="min-h-screen bg-gray-950 text-white p-4 md:p-6">
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-green-400">⚡ GridSense</h1>
-        <p className="text-gray-400 mt-1">
-          Real-Time Industrial Energy Intelligence Platform
-        </p>
+      <div className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between">
+        <div>
+          <h1 className="text-2xl md:text-3xl font-bold text-green-400">
+            ⚡ GridSense
+          </h1>
+          <p className="text-gray-400 text-sm mt-1">
+            Real-Time Industrial Energy Intelligence Platform
+          </p>
+        </div>
+        <div className="mt-3 md:mt-0 flex items-center gap-3">
+          {lastUpdated && (
+            <p className="text-gray-500 text-xs">
+              Last updated: {lastUpdated}
+            </p>
+          )}
+          <button
+            onClick={() => fetchAllData(true)}
+            disabled={refreshing}
+            className="px-3 py-1 text-xs bg-green-400 text-gray-950 rounded-lg font-semibold hover:bg-green-300 disabled:opacity-50 transition-all"
+          >
+            {refreshing ? "Refreshing..." : "⟳ Refresh"}
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -163,21 +198,23 @@ export default function Home() {
       ) : (
         <>
           {/* Energy Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             {energyData.map((country) => (
               <div
                 key={country.country}
                 onClick={() =>
                   setSelectedCountry(country.country.toLowerCase())
                 }
-                className={`p-4 rounded-xl cursor-pointer border transition-all ${
+                className={`p-3 md:p-4 rounded-xl cursor-pointer border transition-all ${
                   selectedCountry === country.country.toLowerCase()
                     ? "border-green-400 bg-gray-800"
                     : "border-gray-700 bg-gray-900 hover:border-gray-500"
                 }`}
               >
-                <p className="text-gray-400 text-sm">{country.country}</p>
-                <p className="text-2xl font-bold text-white mt-1">
+                <p className="text-gray-400 text-xs md:text-sm">
+                  {country.country}
+                </p>
+                <p className="text-xl md:text-2xl font-bold text-white mt-1">
                   {Math.round(country.latest_load_mw).toLocaleString()}
                 </p>
                 <p className="text-green-400 text-xs mt-1">MW — Live</p>
@@ -186,20 +223,21 @@ export default function Home() {
           </div>
 
           {/* Energy Chart */}
-          <div className="bg-gray-900 rounded-xl p-6 mb-8 border border-gray-700">
-            <h2 className="text-lg font-semibold mb-4 text-green-400">
+          <div className="bg-gray-900 rounded-xl p-4 md:p-6 mb-6 border border-gray-700">
+            <h2 className="text-base md:text-lg font-semibold mb-4 text-green-400">
               ⚡ {selectedCountry.toUpperCase()} — Last 24hr Energy Load (MW)
             </h2>
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={250}>
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis dataKey="hour" stroke="#9CA3AF" />
-                <YAxis stroke="#9CA3AF" />
+                <XAxis dataKey="hour" stroke="#9CA3AF" tick={{ fontSize: 11 }} />
+                <YAxis stroke="#9CA3AF" tick={{ fontSize: 11 }} />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: "#1F2937",
                     border: "1px solid #374151",
                     borderRadius: "8px",
+                    fontSize: "12px",
                   }}
                 />
                 <Legend />
@@ -217,54 +255,56 @@ export default function Home() {
 
           {/* Stats Row */}
           {selectedEnergy && (
-            <div className="grid grid-cols-3 gap-4 mb-8">
-              <div className="bg-gray-900 rounded-xl p-4 border border-gray-700">
-                <p className="text-gray-400 text-sm">Max Load</p>
-                <p className="text-xl font-bold text-red-400">
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              <div className="bg-gray-900 rounded-xl p-3 md:p-4 border border-gray-700">
+                <p className="text-gray-400 text-xs">Max Load</p>
+                <p className="text-base md:text-xl font-bold text-red-400">
                   {Math.round(selectedEnergy.max_load_mw).toLocaleString()} MW
                 </p>
               </div>
-              <div className="bg-gray-900 rounded-xl p-4 border border-gray-700">
-                <p className="text-gray-400 text-sm">Avg Load</p>
-                <p className="text-xl font-bold text-yellow-400">
+              <div className="bg-gray-900 rounded-xl p-3 md:p-4 border border-gray-700">
+                <p className="text-gray-400 text-xs">Avg Load</p>
+                <p className="text-base md:text-xl font-bold text-yellow-400">
                   {Math.round(selectedEnergy.avg_load_mw).toLocaleString()} MW
                 </p>
               </div>
-              <div className="bg-gray-900 rounded-xl p-4 border border-gray-700">
-                <p className="text-gray-400 text-sm">Min Load</p>
-                <p className="text-xl font-bold text-green-400">
+              <div className="bg-gray-900 rounded-xl p-3 md:p-4 border border-gray-700">
+                <p className="text-gray-400 text-xs">Min Load</p>
+                <p className="text-base md:text-xl font-bold text-green-400">
                   {Math.round(selectedEnergy.min_load_mw).toLocaleString()} MW
                 </p>
               </div>
             </div>
           )}
 
-          {/* Forecast Chart */}
-          {forecastChartData && (
-            <div className="bg-gray-900 rounded-xl p-6 mb-8 border border-purple-800">
-              <h2 className="text-lg font-semibold mb-1 text-purple-400">
-                🤖 ML Forecast — Germany Next 24hr (Prophet Model)
+          {/* ML Forecast Chart */}
+          {forecastData && (
+            <div className="bg-gray-900 rounded-xl p-4 md:p-6 mb-6 border border-blue-800">
+              <h2 className="text-base md:text-lg font-semibold mb-1 text-blue-400">
+                🤖 ML Forecast — Next 24hr Germany Energy (MW)
               </h2>
               <p className="text-gray-500 text-xs mb-4">
-                Predicted energy consumption based on historical patterns
+                Model: {forecastData.model} — {forecastData.total_predictions}{" "}
+                predictions
               </p>
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={forecastChartData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="time" stroke="#9CA3AF" />
-                  <YAxis stroke="#9CA3AF" />
+                  <XAxis dataKey="time" stroke="#9CA3AF" tick={{ fontSize: 11 }} />
+                  <YAxis stroke="#9CA3AF" tick={{ fontSize: 11 }} />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "#1F2937",
                       border: "1px solid #374151",
                       borderRadius: "8px",
+                      fontSize: "12px",
                     }}
                   />
                   <Legend />
                   <Line
                     type="monotone"
                     dataKey="predicted"
-                    stroke="#A855F7"
+                    stroke="#60A5FA"
                     strokeWidth={2}
                     dot={false}
                     name="Predicted (MW)"
@@ -272,20 +312,20 @@ export default function Home() {
                   <Line
                     type="monotone"
                     dataKey="upper"
-                    stroke="#6B21A8"
+                    stroke="#374151"
                     strokeWidth={1}
                     dot={false}
-                    strokeDasharray="4 4"
-                    name="Upper Bound"
+                    strokeDasharray="5 5"
+                    name="Upper bound"
                   />
                   <Line
                     type="monotone"
                     dataKey="lower"
-                    stroke="#6B21A8"
+                    stroke="#374151"
                     strokeWidth={1}
                     dot={false}
-                    strokeDasharray="4 4"
-                    name="Lower Bound"
+                    strokeDasharray="5 5"
+                    name="Lower bound"
                   />
                 </LineChart>
               </ResponsiveContainer>
@@ -293,18 +333,18 @@ export default function Home() {
           )}
 
           {/* Weather Cards */}
-          <div className="bg-gray-900 rounded-xl p-6 border border-gray-700">
-            <h2 className="text-lg font-semibold mb-4 text-blue-400">
+          <div className="bg-gray-900 rounded-xl p-4 md:p-6 border border-gray-700">
+            <h2 className="text-base md:text-lg font-semibold mb-4 text-blue-400">
               🌤️ Live Weather — European Cities
             </h2>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {weatherData.map((city) => (
                 <div
                   key={city.city}
-                  className="bg-gray-800 rounded-lg p-4 border border-gray-700"
+                  className="bg-gray-800 rounded-lg p-3 md:p-4 border border-gray-700"
                 >
-                  <p className="text-gray-400 text-sm">{city.city}</p>
-                  <p className="text-2xl font-bold text-white mt-1">
+                  <p className="text-gray-400 text-xs">{city.city}</p>
+                  <p className="text-xl md:text-2xl font-bold text-white mt-1">
                     {city.temperature[0]}°C
                   </p>
                   <p className="text-blue-400 text-xs mt-1">
