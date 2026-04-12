@@ -8,9 +8,7 @@ Live Demo: [gridsense-eight.vercel.app](https://gridsense-eight.vercel.app)
 
 ## What is GridSense?
 
-GridSense is a real-time energy intelligence dashboard built for European industrial operators, factory managers, and grid engineers.
-
-It fetches live electricity load data from official European power grids and displays it in a clean, interactive dashboard.
+GridSense is a real-time energy intelligence dashboard built for European industrial operators, factory managers, and grid engineers. It fetches live electricity load data from official European power grids, runs ML forecasting, and detects anomalies in real-time.
 
 ---
 
@@ -26,9 +24,23 @@ It fetches live electricity load data from official European power grids and dis
 
 - Live electricity load data for Germany, France, Spain, Poland
 - Last 24hr energy load chart per country
+- ML forecasting — next 24hr predictions using Prophet model
+- Anomaly detection — unusual energy spikes flagged in real-time
 - Max, Min, Average load statistics
 - Live weather data for Berlin, Paris, Madrid, Warsaw
-- Country selector — click any card to switch
+- Auto refresh every 5 minutes
+- Mobile responsive design
+- PWA — installable as mobile app
+
+---
+
+## ML Pipeline
+
+- Data source: ENTSO-E API — 30 days of real European energy data
+- Model: Facebook Prophet — time series forecasting
+- Training: Google Colab (GPU T4)
+- Output: Next 24hr energy consumption predictions with confidence intervals
+- Anomaly Detection: Z-score method — flags unusual spikes (threshold: 2.0 std)
 
 ---
 
@@ -38,8 +50,23 @@ It fetches live electricity load data from official European power grids and dis
 |-------|-----------|
 | Frontend | Next.js 14, Tailwind CSS, Recharts |
 | Backend | Python, FastAPI |
+| ML | Prophet, NumPy |
 | Data | ENTSO-E API, Open-Meteo API |
 | Deployment | Vercel + Render.com |
+
+---
+
+## API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /energy` | All countries live energy data |
+| `GET /energy/{country}` | Single country energy data |
+| `GET /weather` | All cities weather data |
+| `GET /weather/{city}` | Single city weather data |
+| `GET /forecast` | Next 24hr ML predictions |
+| `GET /anomaly/{country}` | Anomaly detection results |
+| `GET /docs` | Swagger API documentation |
 
 ---
 
@@ -52,7 +79,6 @@ It fetches live electricity load data from official European power grids and dis
 
 ## Project Structure
 
-
 gridsense/
 ├── frontend/
 │   └── app/
@@ -63,9 +89,13 @@ gridsense/
 │   ├── data/
 │   │   ├── fetcher.py      # API data fetching
 │   │   └── parser.py       # XML parser
+│   ├── ml/
+│   │   ├── forecaster.py   # Prophet forecasting
+│   │   └── anomaly.py      # Z-score anomaly detection
 │   └── requirements.txt
+├── notebooks/
+│   └── model_training.ipynb
 └── README.md
-
 
 ---
 
