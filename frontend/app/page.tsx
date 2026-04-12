@@ -313,7 +313,7 @@ export default function Home() {
           {forecastData && (
             <div className="bg-gray-900 rounded-xl p-4 md:p-6 mb-6 border border-blue-800">
               <h2 className="text-base md:text-lg font-semibold mb-1 text-blue-400">
-                🤖 ML Forecast — Next 24hr Germany Energy (MW)
+                 ML Forecast — Next 24hr Germany Energy (MW)
               </h2>
               <p className="text-gray-500 text-xs mb-4">
                 Model: {forecastData.model} — {forecastData.total_predictions} predictions
