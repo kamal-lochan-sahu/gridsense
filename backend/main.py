@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 from data.fetcher import get_energy_data, get_weather_data, get_all_energy_data, get_all_cities_weather
 from data.parser import parse_energy_xml
 from ml.forecaster import get_next_24hr_forecast
+from ml.anomaly import detect_anomalies
 import os
 
 load_dotenv()
@@ -100,4 +101,26 @@ def get_forecast():
     result = get_next_24hr_forecast()
     if result["status"] != "success":
         raise HTTPException(status_code=500, detail="Forecast model error")
+    return result
+
+
+@app.get("/anomaly/{country}")
+def get_anomaly(country: str):
+    """
+    Ek country ka anomaly detection — unusual energy spikes flag karo
+    """
+    country = country.lower()
+    if country not in COUNTRY_CODES:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Country '{country}' not found."
+        )
+    raw = get_energy_data(country.capitalize(), COUNTRY_CODES[country])
+    if raw["status"] != "success":
+        raise HTTPException(status_code=500, detail="Failed to fetch energy data")
+
+    parsed = parse_energy_xml(raw["raw_xml"], country.capitalize())
+    loads = parsed.get("all_loads", [])
+    result = detect_anomalies(loads)
+    result["country"] = country.capitalize()
     return result
