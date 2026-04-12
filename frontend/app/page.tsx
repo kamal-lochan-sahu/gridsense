@@ -47,8 +47,24 @@ interface ForecastData {
   predictions: ForecastPoint[];
 }
 
+interface AnomalyPoint {
+  position: number;
+  load_mw: number;
+  z_score: number;
+  deviation: string;
+}
+
+interface AnomalyData {
+  status: string;
+  country: string;
+  total_anomalies: number;
+  mean_load: number;
+  std_load: number;
+  anomalies: AnomalyPoint[];
+}
+
 const API_URL = "https://gridsense-backend-k8pa.onrender.com";
-const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const REFRESH_INTERVAL = 5 * 60 * 1000;
 
 function SplashScreen() {
   const [progress, setProgress] = useState(0);
@@ -99,6 +115,7 @@ export default function Home() {
   const [energyData, setEnergyData] = useState<EnergyData[]>([]);
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [forecastData, setForecastData] = useState<ForecastData | null>(null);
+  const [anomalyData, setAnomalyData] = useState<AnomalyData | null>(null);
   const [selectedCountry, setSelectedCountry] = useState("germany");
   const [loading, setLoading] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
@@ -110,17 +127,20 @@ export default function Home() {
     else setLoading(true);
 
     try {
-      const [energyRes, weatherRes, forecastRes] = await Promise.all([
+      const [energyRes, weatherRes, forecastRes, anomalyRes] = await Promise.all([
         fetch(`${API_URL}/energy`),
         fetch(`${API_URL}/weather`),
         fetch(`${API_URL}/forecast`),
+        fetch(`${API_URL}/anomaly/germany`),
       ]);
       const energy = await energyRes.json();
       const weather = await weatherRes.json();
       const forecast = await forecastRes.json();
+      const anomaly = await anomalyRes.json();
       setEnergyData(energy);
       setWeatherData(weather);
       setForecastData(forecast);
+      setAnomalyData(anomaly);
       setLastUpdated(new Date().toLocaleTimeString());
     } catch (error) {
       console.error("Error fetching data:", error);
@@ -133,12 +153,7 @@ export default function Home() {
   useEffect(() => {
     const splashTimer = setTimeout(() => setShowSplash(false), 2500);
     fetchAllData();
-
-    // Auto refresh every 5 minutes
-    const refreshTimer = setInterval(() => {
-      fetchAllData(true);
-    }, REFRESH_INTERVAL);
-
+    const refreshTimer = setInterval(() => fetchAllData(true), REFRESH_INTERVAL);
     return () => {
       clearTimeout(splashTimer);
       clearInterval(refreshTimer);
@@ -177,9 +192,7 @@ export default function Home() {
         </div>
         <div className="mt-3 md:mt-0 flex items-center gap-3">
           {lastUpdated && (
-            <p className="text-gray-500 text-xs">
-              Last updated: {lastUpdated}
-            </p>
+            <p className="text-gray-500 text-xs">Last updated: {lastUpdated}</p>
           )}
           <button
             onClick={() => fetchAllData(true)}
@@ -197,23 +210,42 @@ export default function Home() {
         </div>
       ) : (
         <>
+          {/* Anomaly Alert */}
+          {anomalyData && anomalyData.total_anomalies > 0 && (
+            <div className="mb-6 p-4 bg-red-900 border border-red-500 rounded-xl">
+              <h3 className="text-red-400 font-semibold text-sm mb-2">
+                ⚠️ {anomalyData.total_anomalies} Anomaly detected in Germany grid!
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {anomalyData.anomalies.map((a, i) => (
+                  <span
+                    key={i}
+                    className={`text-xs px-2 py-1 rounded-full ${
+                      a.deviation === "HIGH"
+                        ? "bg-red-700 text-red-200"
+                        : "bg-yellow-800 text-yellow-200"
+                    }`}
+                  >
+                    {a.deviation} — {Math.round(a.load_mw).toLocaleString()} MW (z={a.z_score})
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Energy Cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
             {energyData.map((country) => (
               <div
                 key={country.country}
-                onClick={() =>
-                  setSelectedCountry(country.country.toLowerCase())
-                }
+                onClick={() => setSelectedCountry(country.country.toLowerCase())}
                 className={`p-3 md:p-4 rounded-xl cursor-pointer border transition-all ${
                   selectedCountry === country.country.toLowerCase()
                     ? "border-green-400 bg-gray-800"
                     : "border-gray-700 bg-gray-900 hover:border-gray-500"
                 }`}
               >
-                <p className="text-gray-400 text-xs md:text-sm">
-                  {country.country}
-                </p>
+                <p className="text-gray-400 text-xs md:text-sm">{country.country}</p>
                 <p className="text-xl md:text-2xl font-bold text-white mt-1">
                   {Math.round(country.latest_load_mw).toLocaleString()}
                 </p>
@@ -284,8 +316,7 @@ export default function Home() {
                 🤖 ML Forecast — Next 24hr Germany Energy (MW)
               </h2>
               <p className="text-gray-500 text-xs mb-4">
-                Model: {forecastData.model} — {forecastData.total_predictions}{" "}
-                predictions
+                Model: {forecastData.model} — {forecastData.total_predictions} predictions
               </p>
               <ResponsiveContainer width="100%" height={250}>
                 <LineChart data={forecastChartData}>
