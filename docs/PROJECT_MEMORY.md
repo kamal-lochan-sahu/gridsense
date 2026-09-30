@@ -32,7 +32,7 @@ Keep repo + git history professional. All work is done locally, then pushed.
 1. Forecast is static: backend/models/predictions.json (24 pts, 11-12 Apr 2026), Germany only;
    prophet_model.pkl is never loaded. UI labels it "Next 24hr".
 2. requirements.txt was UTF-16/CRLF (fixed in Phase 1; now 5 runtime deps).
-3. parser ignores resolution/timestamps; frontend slice(-24) assumes hourly*.
+3. CONFIRMED live 2026-09-30: all zones PT15M (96 pts/24h), Spain had missing position 40; old parser ignored timestamps/gaps and frontend slice(-24) showed ~6h. Parser rewritten on branch feat/parser-timestamps (frontend chart fix still pending).
 4. Weather error fallback returns [0] => UI shows 0 C; card uses temperature[0] (midnight), labelled Live.
 5. /energy calls ENTSO-E 4x sequentially, no cache/timeout; every refresh = 5 ENTSO-E calls.
 6. Anomaly: global z-score on 24h data; UI always shows Germany only.

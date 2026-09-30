@@ -1,90 +1,121 @@
+"""Parser for ENTSO-E load documents (documentType A65).
+
+Every point gets a real UTC timestamp: start + (position - 1) * resolution.
+Missing positions are handled according to the series curve type:
+  * A03 (variable sized blocks): an omitted point repeats the previous value.
+  * anything else: the point is a real gap and stays None in ``series``.
+"""
+import re
 import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 
-# ENTSO-E XML ka namespace
-NAMESPACE = {"ns": "urn:iec62325.351:tc57wg16:451-6:generationloaddocument:3:0"}
+_RESOLUTION_RE = re.compile(r"^PT(?:(\d+)H)?(?:(\d+)M)?$")
 
 
-def parse_energy_xml(xml_text: str, country: str):
-    """
-    ENTSO-E ka raw XML parse karke clean data nikalo
-    """
+def _local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _child(element, name):
+    for child in element:
+        if _local(child.tag) == name:
+            return child
+    return None
+
+
+def _children(element, name):
+    return [child for child in element if _local(child.tag) == name]
+
+
+def _resolution_minutes(text):
+    match = _RESOLUTION_RE.match(text or "")
+    if not match or not (match.group(1) or match.group(2)):
+        raise ValueError(f"Unsupported resolution: {text!r}")
+    return int(match.group(1) or 0) * 60 + int(match.group(2) or 0)
+
+
+def _parse_time(text: str) -> datetime:
+    parsed = datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _format_time(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%MZ")
+
+
+def parse_energy_xml(xml_text: str, country: str) -> dict:
+    """Parse a raw ENTSO-E XML document into a clean, timestamped load series."""
     try:
         root = ET.fromstring(xml_text)
 
-        # Saare time periods aur values nikalo
-        time_series_data = []
+        if _local(root.tag) == "Acknowledgement_MarketDocument":
+            reason = _child(root, "Reason")
+            text_el = _child(reason, "text") if reason is not None else None
+            message = text_el.text if text_el is not None and text_el.text else "No matching data found"
+            return {"country": country, "status": "no_data", "message": message}
 
-        for timeseries in root.findall("ns:TimeSeries", NAMESPACE):
-            for period in timeseries.findall("ns:Period", NAMESPACE):
+        points = {}
+        resolution = None
+        filled = 0
 
-                # Time interval nikalo
-                start_time = period.find(
-                    "ns:timeInterval/ns:start", NAMESPACE
-                ).text
+        for series_el in _children(root, "TimeSeries"):
+            curve_el = _child(series_el, "curveType")
+            forward_fill = curve_el is not None and (curve_el.text or "").strip() == "A03"
 
-                # Resolution nikalo (PT60M = 60 min interval)
-                resolution = period.find("ns:resolution", NAMESPACE).text
+            for period in _children(series_el, "Period"):
+                interval = _child(period, "timeInterval")
+                start = _parse_time(_child(interval, "start").text)
+                end = _parse_time(_child(interval, "end").text)
+                resolution = _resolution_minutes(_child(period, "resolution").text)
+                step = timedelta(minutes=resolution)
+                expected = int((end - start) / step)
 
-                # Har point ki value nikalo
-                points = []
-                for point in period.findall("ns:Point", NAMESPACE):
-                    position = point.find("ns:position", NAMESPACE).text
-                    quantity = point.find("ns:quantity", NAMESPACE).text
-                    points.append({
-                        "position": int(position),
-                        "load_mw": float(quantity)
-                    })
+                by_position = {}
+                for point in _children(period, "Point"):
+                    position = int(_child(point, "position").text)
+                    by_position[position] = float(_child(point, "quantity").text)
 
-                time_series_data.append({
-                    "start_time": start_time,
-                    "resolution": resolution,
-                    "points": points
-                })
+                last_value = None
+                for position in range(1, expected + 1):
+                    moment = start + (position - 1) * step
+                    if position in by_position:
+                        last_value = by_position[position]
+                        points[moment] = last_value
+                    elif forward_fill and last_value is not None:
+                        points[moment] = last_value
+                        filled += 1
+                    else:
+                        points.setdefault(moment, None)
 
-        # Latest values nikalo
-        all_loads = []
-        for ts in time_series_data:
-            for point in ts["points"]:
-                all_loads.append(point["load_mw"])
+        if not points:
+            return {"country": country, "status": "no_data", "message": "No time series data found"}
 
-        if all_loads:
-            return {
-                "country": country,
-                "status": "success",
-                "total_points": len(all_loads),
-                "latest_load_mw": all_loads[-1],
-                "max_load_mw": max(all_loads),
-                "min_load_mw": min(all_loads),
-                "avg_load_mw": round(sum(all_loads) / len(all_loads), 2),
-                "all_loads": all_loads
-            }
-        else:
-            return {
-                "country": country,
-                "status": "no_data",
-                "message": "No time series data found"
-            }
+        ordered = sorted(points.items())
+        values = [value for _, value in ordered if value is not None]
+        if not values:
+            return {"country": country, "status": "no_data", "message": "Series contains no values"}
 
-    except Exception as e:
+        latest_time = max(moment for moment, value in ordered if value is not None)
+
         return {
             "country": country,
-            "status": "error",
-            "message": str(e)
+            "status": "success",
+            "resolution_minutes": resolution,
+            "expected_points": len(ordered),
+            "total_points": len(values),
+            "missing_points": len(ordered) - len(values),
+            "filled_points": filled,
+            "latest_time": _format_time(latest_time),
+            "latest_load_mw": points[latest_time],
+            "max_load_mw": max(values),
+            "min_load_mw": min(values),
+            "avg_load_mw": round(sum(values) / len(values), 2),
+            "all_loads": values,
+            "series": [
+                {"time": _format_time(moment), "load_mw": value} for moment, value in ordered
+            ],
         }
-
-
-# Test karne ke liye
-if __name__ == "__main__":
-    from fetcher import get_energy_data
-
-    print("⚡ Parsing Germany energy data...\n")
-    raw = get_energy_data("Germany", "10Y1001A1001A83F")
-
-    if raw["status"] == "success":
-        result = parse_energy_xml(raw["raw_xml"], "Germany")
-        print(f"Country: {result['country']}")
-        print(f"Total data points: {result['total_points']}")
-        print(f"Latest load: {result['latest_load_mw']} MW")
-        print(f"Max load: {result['max_load_mw']} MW")
-        print(f"Min load: {result['min_load_mw']} MW")
-        print(f"Average load: {result['avg_load_mw']} MW")
+    except Exception as exc:  # malformed XML or unexpected structure
+        return {"country": country, "status": "error", "message": str(exc)}
