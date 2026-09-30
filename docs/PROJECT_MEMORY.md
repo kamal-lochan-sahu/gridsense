@@ -31,7 +31,7 @@ Keep repo + git history professional. All work is done locally, then pushed.
 ## Known issues (from code audit; * = inferred from code, not verified live)
 1. Forecast is static: backend/models/predictions.json (24 pts, 11-12 Apr 2026), Germany only;
    prophet_model.pkl is never loaded. UI labels it "Next 24hr".
-2. requirements.txt was UTF-16/CRLF and had no prophet (fixed in Phase 1).
+2. requirements.txt was UTF-16/CRLF (fixed in Phase 1; now 5 runtime deps).
 3. parser ignores resolution/timestamps; frontend slice(-24) assumes hourly*.
 4. Weather error fallback returns [0] => UI shows 0 C; card uses temperature[0] (midnight), labelled Live.
 5. /energy calls ENTSO-E 4x sequentially, no cache/timeout; every refresh = 5 ENTSO-E calls.
@@ -43,7 +43,7 @@ Keep repo + git history professional. All work is done locally, then pushed.
 
 ## Roadmap
 - [x] Phase 0: audit (code + git history)
-- [ ] Phase 1: hygiene cleanup (branch chore/phase1-cleanup; script gridsense_phase1.sh)
+- [x] Phase 1: hygiene cleanup (merged to main 2026-09-30)
 - [ ] Phase 2: correctness (parser, caching, timeouts, env-based API URL, error UI, tests, CI, PWA fix)
 - [ ] Phase 3: real ML (scheduled retraining, all countries, better anomaly method)
 - [ ] Phase 4: competitor research + new features
@@ -56,4 +56,4 @@ Keep repo + git history professional. All work is done locally, then pushed.
 - Does Kamal still have the Colab notebook (model_training.ipynb) locally?
 
 ## Session log
-- 2026-09-30 S1: full repo read from tarball, audit, git-history audit, Phase 1 script created.
+- 2026-09-30 S1: full repo read, audit, git-history audit, Phase 1 done (backup tag backup/pre-phase1), pushed and merged to main.
