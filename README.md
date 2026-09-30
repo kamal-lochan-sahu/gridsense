@@ -93,8 +93,6 @@ gridsense/
 │   │   ├── forecaster.py   # Prophet forecasting
 │   │   └── anomaly.py      # Z-score anomaly detection
 │   └── requirements.txt
-├── notebooks/
-│   └── model_training.ipynb
 └── README.md
 
 ---
