@@ -33,11 +33,11 @@ Keep repo + git history professional. All work is done locally, then pushed.
    prophet_model.pkl is never loaded. UI labels it "Next 24hr".
 2. requirements.txt was UTF-16/CRLF (fixed in Phase 1; now 5 runtime deps).
 3. CONFIRMED live 2026-09-30: all zones PT15M (96 pts/24h), Spain had missing position 40; old parser ignored timestamps/gaps and frontend slice(-24) showed ~6h. Parser rewritten on branch feat/parser-timestamps (frontend chart fix still pending).
-4. Weather error fallback returns [0] => UI shows 0 C; card uses temperature[0] (midnight), labelled Live. Frontend fixed (uses current hour, shows N/A on error); backend [0] fallback still pending.
-5. /energy calls ENTSO-E 4x sequentially, no cache/timeout; every refresh = 5 ENTSO-E calls.
+4. Weather error fallback returns [0] => UI shows 0 C; card uses temperature[0] (midnight), labelled Live. Frontend fixed (uses current hour, shows N/A on error); backend [0] fallback still pending. Backend [0] fallback removed: upstream failures now give 502 or skip the city.
+5. /energy calls ENTSO-E 4x sequentially, no cache/timeout; every refresh = 5 ENTSO-E calls. Fixed on branch feat/backend-hardening: parallel fetch, 5-min TTL cache shared by /energy and /anomaly, stale-on-error, timeouts and retries.
 6. Anomaly: global z-score on 24h data; UI always shows Germany only. Frontend now fetches anomalies for the selected country; detection method still pending (Phase 3).
 7. next-pwa still in package.json but unused; manifest not linked in layout; no service worker. next-pwa removed and manifest linked in layout; no service worker yet.
-8. API_URL hardcoded in page.tsx; CORS "*"; no tests, CI, logging, error UI. API URL now via NEXT_PUBLIC_API_URL and error UI added; CORS, tests, CI, logging still pending.
+8. API_URL hardcoded in page.tsx; CORS "*"; no tests, CI, logging, error UI. API URL now via NEXT_PUBLIC_API_URL and error UI added; CORS, tests, CI, logging still pending. Backend: CORS origins configurable (CORS_ORIGINS), logging and 37 backend tests added; CI still pending.
 9. README claims (GPU T4 Colab, notebooks/) unverified / missing.
 10. Hinglish comments, datetime.utcnow() deprecated, duplicated country maps, unused imports.
 
@@ -58,3 +58,4 @@ Keep repo + git history professional. All work is done locally, then pushed.
 ## Session log
 - 2026-09-30 S1: full repo read, audit, git-history audit, Phase 1 done (backup tag backup/pre-phase1), pushed and merged to main.
 - 2026-09-30 S1: parser merged to main (d256a6e); frontend fixes on branch feat/frontend-live-data.
+- 2026-10-01 S1: frontend live on Vercel (8f61dc3); backend hardening on branch feat/backend-hardening.
