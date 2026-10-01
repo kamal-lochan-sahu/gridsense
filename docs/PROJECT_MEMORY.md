@@ -44,7 +44,7 @@ Keep repo + git history professional. All work is done locally, then pushed.
 ## Roadmap
 - [x] Phase 0: audit (code + git history)
 - [x] Phase 1: hygiene cleanup (merged to main 2026-09-30)
-- [ ] Phase 2: correctness (parser, caching, timeouts, env-based API URL, error UI, tests, CI, PWA fix)
+- [x] Phase 2: correctness (parser, caching, timeouts, env-based API URL, error UI, tests, CI, next-pwa removed; done 2026-10-01)
 - [ ] Phase 3: real ML (scheduled retraining, all countries, better anomaly method)
 - [ ] Phase 4: competitor research + new features
 
@@ -59,3 +59,4 @@ Keep repo + git history professional. All work is done locally, then pushed.
 - 2026-09-30 S1: full repo read, audit, git-history audit, Phase 1 done (backup tag backup/pre-phase1), pushed and merged to main.
 - 2026-09-30 S1: parser merged to main (d256a6e); frontend fixes on branch feat/frontend-live-data.
 - 2026-10-01 S1: frontend live on Vercel (8f61dc3); backend hardening on branch feat/backend-hardening.
+- 2026-10-01 S1: backend hardening live (8f6440c); GitHub Actions CI and README rewrite added on branch chore/ci-and-readme.

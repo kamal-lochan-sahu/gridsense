@@ -1,132 +1,152 @@
 # ⚡ GridSense
 
-**Real-Time Industrial Energy Intelligence Platform**
+[![CI](https://github.com/kamal-lochan-sahu/gridsense/actions/workflows/ci.yml/badge.svg)](https://github.com/kamal-lochan-sahu/gridsense/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Live Demo: [gridsense-eight.vercel.app](https://gridsense-eight.vercel.app)
+**Real-time electricity load dashboard for European grids.**
 
----
+- Live app: <https://gridsense-eight.vercel.app>
+- API: <https://gridsense-backend-k8pa.onrender.com> ([interactive docs](https://gridsense-backend-k8pa.onrender.com/docs))
 
-## What is GridSense?
+> The API runs on a free Render instance. After a period of inactivity the first request can take up to a minute while the server wakes up.
 
-GridSense is a real-time energy intelligence dashboard built for European industrial operators, factory managers, and grid engineers. It fetches live electricity load data from official European power grids, runs ML forecasting, and detects anomalies in real-time.
+## What it does
 
----
+GridSense pulls official actual-load data from the ENTSO-E Transparency Platform for Germany, France, Spain and Poland and shows it next to local weather, an anomaly check and a 24-hour forecast.
 
-## The Problem
+- **Load chart per country**: the last 24 hours in 15-minute steps, with real timestamps shown in your local time, plus max / average / min.
+- **Anomaly detection**: flags load values more than 2 standard deviations from the 24-hour mean (z-score) and shows when they happened.
+- **Weather**: current temperature, wind speed and cloud cover for Berlin, Paris, Madrid and Warsaw (Open-Meteo).
+- **Forecast**: Prophet predictions for Germany. These are currently a **static file generated in April 2026**; the UI says so. Automatic retraining is planned (see roadmap).
+- **Resilient by design**: results are cached, data providers are called in parallel with timeouts and retries, and if a provider fails the API serves the last good data (flagged `"stale": true`) or a clear `502` error instead of made-up values.
+- Auto-refresh every 5 minutes, responsive layout.
 
-- European energy grids are becoming unstable due to renewable energy unpredictability
-- German industries lose €4+ billion annually from poor energy management
-- No affordable real-time prediction tool exists for factory operators
+ENTSO-E publishes load data with a delay of roughly one hour, so the newest point is never "now". Each card shows the time of its latest value.
 
----
+## Architecture
 
-## Features
+```
+Browser ── Next.js dashboard (Vercel)
+              │  fetch (JSON)
+              ▼
+        FastAPI backend (Render) ── TTL cache ──┬─ ENTSO-E Transparency Platform (load, XML)
+                                                └─ Open-Meteo (weather, JSON)
+```
 
-- Live electricity load data for Germany, France, Spain, Poland
-- Last 24hr energy load chart per country
-- ML forecasting — next 24hr predictions using Prophet model
-- Anomaly detection — unusual energy spikes flagged in real-time
-- Max, Min, Average load statistics
-- Live weather data for Berlin, Paris, Madrid, Warsaw
-- Auto refresh every 5 minutes
-- Mobile responsive design
-- PWA — installable as mobile app
+| Layer    | Technology                                         |
+| -------- | -------------------------------------------------- |
+| Frontend | Next.js 16, React 19, Tailwind CSS 4, Recharts      |
+| Backend  | Python 3.12, FastAPI, requests, NumPy               |
+| Data     | ENTSO-E Transparency Platform, Open-Meteo           |
+| Forecast | Prophet (pre-computed predictions)                  |
+| Hosting  | Vercel (frontend), Render (backend)                 |
+| CI       | GitHub Actions                                      |
 
----
+## API
 
-## ML Pipeline
+| Endpoint                 | Description                                                    |
+| ------------------------ | -------------------------------------------------------------- |
+| `GET /energy`            | 24h load of all countries (countries that fail are skipped)    |
+| `GET /energy/{country}`  | 24h load of one country: `germany`, `france`, `spain`, `poland` |
+| `GET /anomaly/{country}` | Anomalies in the 24h load of one country                       |
+| `GET /weather`           | Hourly weather for all cities                                  |
+| `GET /weather/{city}`    | Hourly weather for one city: `berlin`, `paris`, `madrid`, `warsaw` |
+| `GET /forecast`          | Pre-computed 24h forecast (Germany)                            |
+| `GET /health`            | Liveness, configuration check and cache ages                   |
 
-- Data source: ENTSO-E API — 30 days of real European energy data
-- Model: Facebook Prophet — time series forecasting
-- Training: Google Colab (GPU T4)
-- Output: Next 24hr energy consumption predictions with confidence intervals
-- Anomaly Detection: Z-score method — flags unusual spikes (threshold: 2.0 std)
+Energy responses include a timestamped `series` (`{time, load_mw}`, `null` marks a real gap), the resolution, summary statistics, `fetched_at` and `stale`. Unknown regions return `404`; an unavailable data provider returns `502` with a `detail` message.
 
----
+## Project structure
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 14, Tailwind CSS, Recharts |
-| Backend | Python, FastAPI |
-| ML | Prophet, NumPy |
-| Data | ENTSO-E API, Open-Meteo API |
-| Deployment | Vercel + Render.com |
-
----
-
-## API Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /energy` | All countries live energy data |
-| `GET /energy/{country}` | Single country energy data |
-| `GET /weather` | All cities weather data |
-| `GET /weather/{city}` | Single city weather data |
-| `GET /forecast` | Next 24hr ML predictions |
-| `GET /anomaly/{country}` | Anomaly detection results |
-| `GET /docs` | Swagger API documentation |
-
----
-
-## Data Sources
-
-- **ENTSO-E API** — Official European electricity transparency platform
-- **Open-Meteo API** — Free weather data, no API key required
-
----
-
-## Project Structure
-
+```
 gridsense/
-├── frontend/
-│   └── app/
-│       ├── page.tsx        # Main dashboard
-│       └── layout.tsx      # App layout
 ├── backend/
-│   ├── main.py             # FastAPI server
-│   ├── data/
-│   │   ├── fetcher.py      # API data fetching
-│   │   └── parser.py       # XML parser
-│   ├── ml/
-│   │   ├── forecaster.py   # Prophet forecasting
-│   │   └── anomaly.py      # Z-score anomaly detection
-│   └── requirements.txt
-└── README.md
+│   ├── main.py            # FastAPI app and routes
+│   ├── core/              # config, TTL cache, cached data service
+│   ├── data/              # ENTSO-E / Open-Meteo clients, ENTSO-E XML parser
+│   ├── ml/                # anomaly detection, forecast loader
+│   ├── models/            # pre-computed Prophet predictions
+│   └── tests/             # pytest suite (no network access needed)
+├── frontend/
+│   ├── app/               # Next.js app router: dashboard page and layout
+│   ├── lib/               # API client, types, formatting helpers
+│   └── public/            # icons and manifest
+├── docs/                  # project notes
+├── render.yaml            # Render service definition
+└── .github/workflows/     # CI
+```
 
----
+## Run it locally
 
-## Local Setup
+You need Python 3.11+ (3.12 recommended), Node.js 20+ and a free [ENTSO-E API token](https://transparency.entsoe.eu/) (register an account, email the platform support to enable RESTful API access, then copy the token from your account settings).
 
-**Backend:**
+**Backend**
+
 ```bash
 cd backend
-python -m venv venv
-venv\Scripts\activate
+python3 -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+echo "ENTSOE_API_KEY=your_token_here" > .env
 uvicorn main:app --reload
 ```
 
-**Frontend:**
+The API is now on <http://localhost:8000> (docs at `/docs`).
+
+**Frontend**
+
 ```bash
 cd frontend
-npm install
+npm ci
+echo "NEXT_PUBLIC_API_URL=http://localhost:8000" > .env.local
 npm run dev
 ```
 
----
+Open <http://localhost:3000>. Without `NEXT_PUBLIC_API_URL` the frontend uses the production API.
 
-## Live URLs
+## Configuration
 
-- Frontend: https://gridsense-eight.vercel.app
-- Backend API: https://gridsense-backend-k8pa.onrender.com
-- API Docs: https://gridsense-backend-k8pa.onrender.com/docs
+| Variable               | Where    | Default       | Purpose                                          |
+| ---------------------- | -------- | ------------- | ------------------------------------------------ |
+| `ENTSOE_API_KEY`       | backend  | (required)    | ENTSO-E web API security token                   |
+| `ENERGY_TTL_SECONDS`   | backend  | `300`         | How long load data is cached                     |
+| `WEATHER_TTL_SECONDS`  | backend  | `1800`        | How long weather data is cached                  |
+| `MAX_STALE_SECONDS`    | backend  | `21600`       | Oldest cached data served when a provider fails  |
+| `CORS_ORIGINS`         | backend  | `*`           | Comma-separated list of allowed origins          |
+| `LOG_LEVEL`            | backend  | `INFO`        | Python logging level                             |
+| `NEXT_PUBLIC_API_URL`  | frontend | production API | Base URL of the backend                         |
 
----
+## Tests
 
-## Author
+```bash
+# backend
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest
 
-**Kamal Lochan Sahu**
-Full Stack + ML Engineer
-GitHub: [kamal-lochan-sahu](https://github.com/kamal-lochan-sahu)
+# frontend
+cd frontend
+npm run lint && npx tsc --noEmit && npm run build
+```
+
+CI runs both on every push to `main` and on pull requests.
+
+## Deployment
+
+- **Backend**: Render web service from `render.yaml` (root directory `backend`, health check `/health`). Set `ENTSOE_API_KEY` in the service environment.
+- **Frontend**: Vercel project with root directory `frontend`. Optionally set `NEXT_PUBLIC_API_URL`.
+
+## Roadmap
+
+- Live forecasting: scheduled retraining on fresh ENTSO-E data for every country, replacing the static predictions.
+- Better anomaly detection that accounts for the daily load pattern (for example residuals against the forecast).
+- More bidding zones and data types (generation mix, cross-border flows).
+
+## Data sources
+
+- Electricity load: [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/)
+- Weather: [Open-Meteo](https://open-meteo.com/) (CC BY 4.0)
+
+## License
+
+[MIT](LICENSE) © Kamal Lochan Sahu
