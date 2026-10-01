@@ -1,135 +1,104 @@
-import requests
-from datetime import datetime, timedelta
-from dotenv import load_dotenv
+"""HTTP clients for ENTSO-E (electricity load) and Open-Meteo (weather).
+
+Both functions raise ``UpstreamError`` instead of returning placeholder data.
+Error messages never contain the ENTSO-E security token.
+"""
+import logging
 import os
+from datetime import datetime, timedelta, timezone
+
+import requests
+from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 load_dotenv()
+log = logging.getLogger(__name__)
 
-ENTSOE_API_KEY = os.getenv("ENTSOE_API_KEY")
 ENTSOE_BASE_URL = "https://web-api.tp.entsoe.eu/api"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
-
-COUNTRY_CODES = {
-    "Germany": "10Y1001A1001A83F",
-    "France": "10YFR-RTE------C",
-    "Spain": "10YES-REE------0",
-    "Poland": "10YPL-AREA-----S",
-}
-
-EUROPEAN_CITIES = [
-    {"city": "Berlin", "latitude": 52.52, "longitude": 13.41},
-    {"city": "Paris", "latitude": 48.85, "longitude": 2.35},
-    {"city": "Madrid", "latitude": 40.42, "longitude": -3.70},
-    {"city": "Warsaw", "latitude": 52.23, "longitude": 21.01},
-]
+REQUEST_TIMEOUT = (5, 25)  # (connect, read) seconds
 
 
-def get_energy_data(country: str, country_code: str):
-    now = datetime.utcnow()
-    start = (now - timedelta(hours=24)).strftime("%Y%m%d%H00")
-    end = now.strftime("%Y%m%d%H00")
+class UpstreamError(Exception):
+    """An upstream data provider failed or returned unusable data."""
 
+
+def _build_session() -> requests.Session:
+    retry = Retry(
+        total=2,
+        backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=("GET",),
+        respect_retry_after_header=False,  # keep worst-case latency bounded
+    )
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(max_retries=retry, pool_maxsize=10))
+    return session
+
+
+_session = _build_session()
+
+
+def fetch_energy_xml(country: str, country_code: str) -> str:
+    """Raw ENTSO-E actual-load XML for the last 24 hours."""
+    api_key = os.getenv("ENTSOE_API_KEY")
+    if not api_key:
+        raise UpstreamError("ENTSOE_API_KEY is not configured")
+
+    now = datetime.now(timezone.utc)
     params = {
-        "securityToken": ENTSOE_API_KEY,
+        "securityToken": api_key,
         "documentType": "A65",
         "processType": "A16",
         "outBiddingZone_Domain": country_code,
-        "periodStart": start,
-        "periodEnd": end,
+        "periodStart": (now - timedelta(hours=24)).strftime("%Y%m%d%H00"),
+        "periodEnd": now.strftime("%Y%m%d%H00"),
     }
-
-    response = requests.get(ENTSOE_BASE_URL, params=params)
-
-    if response.status_code == 200:
-        return {
-            "country": country,
-            "status": "success",
-            "data_length": len(response.text),
-            "raw_xml": response.text
-        }
-    else:
-        return {
-            "country": country,
-            "status": "error",
-            "error_code": response.status_code,
-            "message": response.text[:200]
-        }
-
-
-def get_weather_data(latitude: float, longitude: float, city: str):
     try:
-        params = {
-            "latitude": latitude,
-            "longitude": longitude,
-            "hourly": "temperature_2m,windspeed_10m,cloudcover",
-            "forecast_days": 2,
-            "timezone": "Europe/Berlin"
-        }
-        response = requests.get(WEATHER_URL, params=params)
+        response = _session.get(ENTSOE_BASE_URL, params=params, timeout=REQUEST_TIMEOUT)
+    except requests.RequestException as exc:
+        # Only the exception type is logged: request errors can embed the URL (and token).
+        log.warning("ENTSO-E request failed for %s: %s", country, type(exc).__name__)
+        raise UpstreamError(f"ENTSO-E request failed for {country}") from None
+
+    if response.status_code != 200:
+        log.warning("ENTSO-E returned HTTP %s for %s", response.status_code, country)
+        raise UpstreamError(f"ENTSO-E returned HTTP {response.status_code} for {country}")
+    return response.text
+
+
+def fetch_weather(city: str, latitude: float, longitude: float) -> dict:
+    """Hourly temperature, wind speed and cloud cover for the next two days."""
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "hourly": "temperature_2m,windspeed_10m,cloudcover",
+        "forecast_days": 2,
+        "timezone": "Europe/Berlin",
+    }
+    try:
+        response = _session.get(WEATHER_URL, params=params, timeout=REQUEST_TIMEOUT)
         data = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        log.warning("Open-Meteo request failed for %s: %s", city, type(exc).__name__)
+        raise UpstreamError(f"Open-Meteo request failed for {city}") from None
 
-        if data.get("error"):
-            return {
-                "city": city,
-                "timezone": "Europe/Berlin",
-                "hourly_time": [],
-                "temperature": [0],
-                "windspeed": [0],
-                "cloudcover": [0]
-            }
+    if not isinstance(data, dict) or response.status_code != 200 or data.get("error"):
+        reason = data.get("reason") if isinstance(data, dict) else None
+        log.warning("Open-Meteo error for %s: HTTP %s %s", city, response.status_code, reason)
+        raise UpstreamError(f"Open-Meteo error for {city}: {reason or response.status_code}")
 
-        hourly = data.get("hourly", {})
-        return {
-            "city": city,
-            "timezone": data.get("timezone", "Europe/Berlin"),
-            "hourly_time": hourly.get("time", []),
-            "temperature": hourly.get("temperature_2m", [0]),
-            "windspeed": hourly.get("windspeed_10m", [0]),
-            "cloudcover": hourly.get("cloudcover", [0])
-        }
-    except Exception as e:
-        return {
-            "city": city,
-            "timezone": "Europe/Berlin",
-            "hourly_time": [],
-            "temperature": [0],
-            "windspeed": [0],
-            "cloudcover": [0]
-        }
+    hourly = data.get("hourly") or {}
+    times = hourly.get("time") or []
+    if not times:
+        raise UpstreamError(f"Open-Meteo returned no hourly data for {city}")
 
-
-def get_all_energy_data():
-    results = []
-    for country, code in COUNTRY_CODES.items():
-        data = get_energy_data(country, code)
-        results.append(data)
-    return results
-
-
-def get_all_cities_weather():
-    results = []
-    for city_info in EUROPEAN_CITIES:
-        data = get_weather_data(
-            latitude=city_info["latitude"],
-            longitude=city_info["longitude"],
-            city=city_info["city"]
-        )
-        results.append(data)
-    return results
-
-
-if __name__ == "__main__":
-    print("⚡ Fetching ENTSO-E Energy Data...\n")
-    energy_data = get_all_energy_data()
-
-    print("\n🌍 Fetching Weather Data...\n")
-    weather_data = get_all_cities_weather()
-
-    print("\n📊 Sample — Germany Energy:")
-    germany = energy_data[0]
-    print(f"Status: {germany['status']}")
-
-    print("\n📊 Sample — Berlin Weather:")
-    berlin = weather_data[0]
-    print(f"Temperature: {berlin['temperature'][0]}°C")
-    print(f"Wind Speed: {berlin['windspeed'][0]} km/h")
+    return {
+        "city": city,
+        "timezone": data.get("timezone", "Europe/Berlin"),
+        "hourly_time": times,
+        "temperature": hourly.get("temperature_2m", []),
+        "windspeed": hourly.get("windspeed_10m", []),
+        "cloudcover": hourly.get("cloudcover", []),
+    }

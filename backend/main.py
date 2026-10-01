@@ -1,41 +1,52 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-from data.fetcher import get_energy_data, get_weather_data, get_all_energy_data, get_all_cities_weather
-from data.parser import parse_energy_xml
-from ml.forecaster import get_next_24hr_forecast
-from ml.anomaly import detect_anomalies
+import logging
 import os
 
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from core import service
+from core.config import CITY_COORDS, COUNTRY_CODES
+from data.fetcher import UpstreamError
+from ml.forecaster import get_next_24hr_forecast
+
 load_dotenv()
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 app = FastAPI(
     title="GridSense API",
     description="Real-Time Industrial Energy Intelligence Platform",
-    version="1.0.0"
+    version="1.1.0",
 )
 
+# Public read-only API without credentials. Restrict with CORS_ORIGINS="https://a.com,https://b.com".
+cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=False,
-    allow_methods=["*"],
+    allow_methods=["GET"],
     allow_headers=["*"],
 )
 
-COUNTRY_CODES = {
-    "germany": "10Y1001A1001A83F",
-    "france": "10YFR-RTE------C",
-    "spain": "10YES-REE------0",
-    "poland": "10YPL-AREA-----S",
-}
 
-CITY_COORDS = {
-    "berlin": {"latitude": 52.52, "longitude": 13.41},
-    "paris": {"latitude": 48.85, "longitude": 2.35},
-    "madrid": {"latitude": 40.42, "longitude": -3.70},
-    "warsaw": {"latitude": 52.23, "longitude": 21.01},
-}
+@app.exception_handler(UpstreamError)
+async def upstream_error_handler(_: Request, exc: UpstreamError):
+    return JSONResponse(status_code=502, content={"detail": str(exc)})
+
+
+def _known_country(country: str) -> str:
+    key = country.lower()
+    if key not in COUNTRY_CODES:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Country '{key}' not found. Available: {list(COUNTRY_CODES)}",
+        )
+    return key
 
 
 @app.get("/")
@@ -45,55 +56,37 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "entsoe_key_configured": bool(os.getenv("ENTSOE_API_KEY")),
+        "cache_age_seconds": service.cache.ages(),
+    }
 
 
 @app.get("/energy/{country}")
 def get_country_energy(country: str):
-    country = country.lower()
-    if country not in COUNTRY_CODES:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Country '{country}' not found. Available: {list(COUNTRY_CODES.keys())}"
-        )
-    raw = get_energy_data(country.capitalize(), COUNTRY_CODES[country])
-    if raw["status"] != "success":
-        raise HTTPException(status_code=500, detail=f"Failed to fetch data for {country}")
-    parsed = parse_energy_xml(raw["raw_xml"], country.capitalize())
-    return parsed
+    return service.get_energy(_known_country(country))
 
 
 @app.get("/energy")
 def get_all_energy():
-    results = []
-    for country, code in COUNTRY_CODES.items():
-        raw = get_energy_data(country.capitalize(), code)
-        if raw["status"] == "success":
-            parsed = parse_energy_xml(raw["raw_xml"], country.capitalize())
-            results.append(parsed)
-    return results
+    return service.get_all_energy()
 
 
 @app.get("/weather/{city}")
 def get_city_weather(city: str):
-    city = city.lower()
-    if city not in CITY_COORDS:
+    key = city.lower()
+    if key not in CITY_COORDS:
         raise HTTPException(
             status_code=404,
-            detail=f"City '{city}' not found. Available: {list(CITY_COORDS.keys())}"
+            detail=f"City '{key}' not found. Available: {list(CITY_COORDS)}",
         )
-    coords = CITY_COORDS[city]
-    data = get_weather_data(
-        latitude=coords["latitude"],
-        longitude=coords["longitude"],
-        city=city.capitalize()
-    )
-    return data
+    return service.get_weather(key)
 
 
 @app.get("/weather")
 def get_all_weather():
-    return get_all_cities_weather()
+    return service.get_all_weather()
 
 
 @app.get("/forecast")
@@ -106,21 +99,5 @@ def get_forecast():
 
 @app.get("/anomaly/{country}")
 def get_anomaly(country: str):
-    """
-    Ek country ka anomaly detection — unusual energy spikes flag karo
-    """
-    country = country.lower()
-    if country not in COUNTRY_CODES:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Country '{country}' not found."
-        )
-    raw = get_energy_data(country.capitalize(), COUNTRY_CODES[country])
-    if raw["status"] != "success":
-        raise HTTPException(status_code=500, detail="Failed to fetch energy data")
-
-    parsed = parse_energy_xml(raw["raw_xml"], country.capitalize())
-    loads = parsed.get("all_loads", [])
-    result = detect_anomalies(loads)
-    result["country"] = country.capitalize()
-    return result
+    """Unusual load values of one country (z-score method)."""
+    return service.get_anomalies(_known_country(country))
