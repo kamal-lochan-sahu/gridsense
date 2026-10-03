@@ -1,6 +1,6 @@
-"""HTTP clients for ENTSO-E (electricity load) and Open-Meteo (weather).
+"""HTTP clients for ENTSO-E (electricity load), Open-Meteo (weather) and the forecast file.
 
-Both functions raise ``UpstreamError`` instead of returning placeholder data.
+All functions raise ``UpstreamError`` instead of returning placeholder data.
 Error messages never contain the ENTSO-E security token.
 """
 import logging
@@ -102,3 +102,27 @@ def fetch_weather(city: str, latitude: float, longitude: float) -> dict:
         "windspeed": hourly.get("windspeed_10m", []),
         "cloudcover": hourly.get("cloudcover", []),
     }
+
+
+def fetch_forecast_file(url: str) -> dict:
+    """The forecast.json published by the scheduled pipeline."""
+    try:
+        response = _session.get(url, timeout=REQUEST_TIMEOUT)
+    except requests.RequestException as exc:
+        log.warning("Forecast file request failed: %s", type(exc).__name__)
+        raise UpstreamError("Forecast file request failed") from None
+
+    if response.status_code != 200:
+        log.warning("Forecast file returned HTTP %s", response.status_code)
+        raise UpstreamError(f"Forecast file returned HTTP {response.status_code}")
+
+    try:
+        data = response.json()
+    except ValueError:
+        raise UpstreamError("Forecast file is not valid JSON") from None
+
+    if not isinstance(data, dict) or not isinstance(data.get("countries"), dict):
+        raise UpstreamError("Forecast file has an unexpected format")
+    if data.get("schema_version") != 1:
+        raise UpstreamError(f"Unsupported forecast schema version: {data.get('schema_version')}")
+    return data

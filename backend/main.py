@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse
 from core import service
 from core.config import CITY_COORDS, COUNTRY_CODES
 from data.fetcher import UpstreamError
-from ml.forecaster import get_next_24hr_forecast
 
 load_dotenv()
 logging.basicConfig(
@@ -59,7 +58,7 @@ def health():
     return {
         "status": "ok",
         "entsoe_key_configured": bool(os.getenv("ENTSOE_API_KEY")),
-        "cache_age_seconds": service.cache.ages(),
+        "cache_age_seconds": {**service.cache.ages(), **service.forecast_cache.ages()},
     }
 
 
@@ -91,13 +90,16 @@ def get_all_weather():
 
 @app.get("/forecast")
 def get_forecast():
-    result = get_next_24hr_forecast()
-    if result["status"] != "success":
-        raise HTTPException(status_code=500, detail="Forecast model error")
-    return result
+    """Germany (kept for older clients); use /forecast/{country} for the others."""
+    return service.get_forecast("germany")
+
+
+@app.get("/forecast/{country}")
+def get_country_forecast(country: str):
+    return service.get_forecast(_known_country(country))
 
 
 @app.get("/anomaly/{country}")
 def get_anomaly(country: str):
-    """Unusual load values of one country (z-score method)."""
+    """Unusual load values of one country (forecast-residual method, z-score fallback)."""
     return service.get_anomalies(_known_country(country))

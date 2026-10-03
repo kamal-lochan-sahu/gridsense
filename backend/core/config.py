@@ -21,3 +21,14 @@ WEATHER_TTL_SECONDS = int(os.getenv("WEATHER_TTL_SECONDS", "1800"))
 
 # If a refresh fails, cached data up to this age is still served (flagged as stale).
 MAX_STALE_SECONDS = int(os.getenv("MAX_STALE_SECONDS", str(6 * 3600)))
+
+# The scheduled pipeline (GitHub Actions) publishes forecast.json to the `data` branch.
+FORECAST_URL = os.getenv(
+    "FORECAST_URL",
+    "https://raw.githubusercontent.com/kamal-lochan-sahu/gridsense/data/forecast.json",
+)
+FORECAST_TTL_SECONDS = int(os.getenv("FORECAST_TTL_SECONDS", "600"))
+# The pipeline runs every few hours; keep serving the last file for up to two days if GitHub is down.
+FORECAST_MAX_STALE_SECONDS = int(os.getenv("FORECAST_MAX_STALE_SECONDS", str(48 * 3600)))
+# Pipeline anomalies older than this are ignored in favour of the live z-score fallback.
+PIPELINE_MAX_AGE_HOURS = float(os.getenv("PIPELINE_MAX_AGE_HOURS", "12"))

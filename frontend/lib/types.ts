@@ -42,11 +42,19 @@ export interface ForecastData {
   model: string;
   total_predictions: number;
   predictions: ForecastPoint[];
+  source?: "pipeline" | "static";
+  backtest_mape_pct?: number; // accuracy of the chosen model over the last backtest days
+  generated_at?: string; // ISO-8601 UTC, when the pipeline produced this forecast
+  data_until?: string;
+  carried_over?: boolean; // the last pipeline run failed for this country; older forecast shown
 }
 
 export interface AnomalyPoint {
-  position: number; // index into the non-null values of the energy series
+  position?: number; // live z-score fallback: index into the non-null values of the energy series
+  time?: string; // pipeline method: ISO-8601 UTC hour, e.g. 2026-10-02T10:00Z
   load_mw: number;
+  expected_mw?: number; // what the forecast model predicted for that hour
+  deviation_pct?: number; // actual vs expected, in percent
   z_score: number;
   deviation: "HIGH" | "LOW";
 }
@@ -57,5 +65,8 @@ export interface AnomalyData {
   total_anomalies: number;
   mean_load?: number;
   std_load?: number;
+  source?: "pipeline" | "live-zscore";
+  method?: string;
+  typical_error_pct?: number;
   anomalies: AnomalyPoint[];
 }

@@ -85,6 +85,7 @@ export default function Home() {
   const [energyData, setEnergyData] = useState<EnergyData[]>([]);
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [forecastData, setForecastData] = useState<ForecastData | null>(null);
+  const [forecastError, setForecastError] = useState<string | null>(null);
   const [anomalyData, setAnomalyData] = useState<AnomalyData | null>(null);
   const [selectedCountry, setSelectedCountry] = useState("germany");
   const [loading, setLoading] = useState(true);
@@ -94,10 +95,9 @@ export default function Home() {
   const [refreshCount, setRefreshCount] = useState(0);
 
   const load = useCallback(async () => {
-    const [energy, weather, forecast] = await Promise.allSettled([
+    const [energy, weather] = await Promise.allSettled([
       getJson<EnergyData[]>("/energy"),
       getJson<WeatherData[]>("/weather"),
-      getJson<ForecastData>("/forecast"),
     ]);
     const problems: string[] = [];
 
@@ -120,14 +120,6 @@ export default function Home() {
       );
     }
 
-    if (forecast.status === "fulfilled" && forecast.value.status === "success") {
-      setForecastData(forecast.value);
-    } else {
-      problems.push(
-        `Forecast: ${forecast.status === "rejected" ? describeError(forecast.reason) : "model returned an error"}`
-      );
-    }
-
     setErrors(problems);
     setUpdatedAt(Date.now());
     setRefreshCount((n) => n + 1);
@@ -147,6 +139,24 @@ export default function Home() {
     const timer = setInterval(() => void refresh(), REFRESH_INTERVAL);
     return () => clearInterval(timer);
   }, [load, refresh]);
+
+  // Forecast and anomalies are fetched for the selected country, after each (re)load of the dashboard.
+  useEffect(() => {
+    if (refreshCount === 0) return;
+    const controller = new AbortController();
+    getJson<ForecastData>(`/forecast/${selectedCountry}`, controller.signal)
+      .then((data) => {
+        const ok = data.status === "success";
+        setForecastData(ok ? data : null);
+        setForecastError(ok ? null : "model returned an error");
+      })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        setForecastData(null);
+        setForecastError(describeError(reason));
+      });
+    return () => controller.abort();
+  }, [selectedCountry, refreshCount]);
 
   // Anomalies are fetched for the selected country, after each (re)load of the dashboard.
   useEffect(() => {
@@ -175,15 +185,18 @@ export default function Home() {
   const anomaly =
     anomalyData && anomalyData.country.toLowerCase() === selectedCountry ? anomalyData : null;
 
-  const forecastChartData = forecastData?.predictions.map((p) => ({
+  const selectedForecast =
+    forecastData && forecastData.country.toLowerCase() === selectedCountry ? forecastData : null;
+
+  const forecastChartData = selectedForecast?.predictions.map((p) => ({
     time: p.ds.slice(11, 16),
     predicted: Math.round(p.yhat),
     upper: Math.round(p.yhat_upper),
     lower: Math.round(p.yhat_lower),
   }));
 
-  const forecastFirst = forecastData?.predictions[0]?.ds;
-  const forecastLast = forecastData?.predictions[forecastData.predictions.length - 1]?.ds;
+  const forecastFirst = selectedForecast?.predictions[0]?.ds;
+  const forecastLast = selectedForecast?.predictions[selectedForecast.predictions.length - 1]?.ds;
   const forecastEnd = forecastLast ? Date.parse(`${forecastLast.replace(" ", "T")}Z`) : NaN;
   const forecastStale = updatedAt !== null && Number.isFinite(forecastEnd) && forecastEnd < updatedAt;
 
@@ -243,10 +256,10 @@ export default function Home() {
           </h3>
           <div className="flex flex-wrap gap-2">
             {anomaly.anomalies.map((a) => {
-              const at = loadedPoints[a.position]?.time;
+              const at = a.time ?? (a.position !== undefined ? loadedPoints[a.position]?.time : undefined);
               return (
                 <span
-                  key={a.position}
+                  key={a.time ?? a.position}
                   className={`text-xs px-2 py-1 rounded-full ${
                     a.deviation === "HIGH"
                       ? "bg-red-700 text-red-200"
@@ -254,7 +267,10 @@ export default function Home() {
                   }`}
                 >
                   {a.deviation} {Math.round(a.load_mw).toLocaleString()} MW
-                  {at ? ` at ${formatTime(at)}` : ""} (z={a.z_score})
+                  {at ? ` at ${formatTime(at)}` : ""}
+                  {a.deviation_pct !== undefined
+                    ? ` (${a.deviation_pct > 0 ? "+" : ""}${a.deviation_pct}% vs forecast, z=${a.z_score})`
+                    : ` (z=${a.z_score})`}
                 </span>
               );
             })}
@@ -361,19 +377,33 @@ export default function Home() {
       )}
 
       {/* ML Forecast Chart */}
-      {forecastData && (
+      {!selectedForecast && forecastError && (
+        <div className="bg-gray-900 rounded-xl p-4 md:p-6 mb-6 border border-yellow-700">
+          <p className="text-yellow-300 text-xs">Forecast unavailable: {forecastError}</p>
+        </div>
+      )}
+      {selectedForecast && (
         <div className="bg-gray-900 rounded-xl p-4 md:p-6 mb-6 border border-blue-800">
           <h2 className="text-base md:text-lg font-semibold mb-1 text-blue-400">
-            ML Forecast — {forecastData.country} Energy (MW)
+            ML Forecast — {selectedForecast.country} Energy (MW)
           </h2>
           <p className="text-gray-500 text-xs mb-4">
-            Model: {forecastData.model} — {forecastData.total_predictions} predictions
+            Model: {selectedForecast.model} — {selectedForecast.total_predictions} hourly predictions (UTC)
+            {selectedForecast.backtest_mape_pct !== undefined
+              ? ` · backtest error ${selectedForecast.backtest_mape_pct}% MAPE`
+              : ""}
           </p>
-          {forecastStale && (
+          {selectedForecast.source === "static" ? (
             <p className="mb-4 text-xs text-yellow-300 bg-yellow-950 border border-yellow-700 rounded-lg p-2">
-              This forecast covers {forecastFirst?.slice(0, 16)} to {forecastLast?.slice(0, 16)} and is
-              not live yet. Automatic retraining is planned.
+              The live forecast is temporarily unavailable. Showing an old static forecast instead.
             </p>
+          ) : (
+            (forecastStale || selectedForecast.carried_over) && (
+              <p className="mb-4 text-xs text-yellow-300 bg-yellow-950 border border-yellow-700 rounded-lg p-2">
+                This forecast covers {forecastFirst?.slice(0, 16)} to {forecastLast?.slice(0, 16)} UTC
+                and the latest scheduled update did not refresh it.
+              </p>
+            )
           )}
           <ResponsiveContainer width="100%" height={250}>
             <LineChart data={forecastChartData}>
