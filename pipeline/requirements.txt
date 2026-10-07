@@ -4,3 +4,4 @@ statsmodels==0.15.0
 prophet==1.4.0
 requests==2.34.2
 python-dotenv==1.2.4
+holidays==0.105

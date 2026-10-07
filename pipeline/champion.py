@@ -7,9 +7,21 @@ mostly noise, so a complicated model has to win clearly to be chosen.
 import numpy as np
 import pandas as pd
 
-from pipeline.models import HORIZON, MODELS
+from pipeline.models import COMPOSITES, HORIZON, MODELS
 
-SIMPLICITY = ["seasonal_naive", "naive_avg3", "ensemble", "prophet_tuned", "prophet", "ets"]
+# Simplest first: on near-ties the simpler model is preferred (see select_champion).
+SIMPLICITY = [
+    "seasonal_naive",
+    "naive_avg3",
+    "naive_daytype",
+    "naive_level",
+    "ensemble",
+    "ensemble_temp",
+    "prophet_tuned",
+    "prophet_temp",
+    "prophet",
+    "ets",
+]
 MARGIN = 0.03
 MIN_HISTORY_HOURS = 24 * 14
 HOUR = pd.Timedelta(hours=1)
@@ -21,25 +33,51 @@ def complete_origins(series: pd.Series, n_origins: int, horizon: int = HORIZON) 
     return [latest - pd.Timedelta(days=i) for i in range(n_origins)][::-1]
 
 
-def predict_origin(series, model_name, origin, country, horizon: int = HORIZON):
-    """Forecast ``horizon`` hours from ``origin`` using only data before it. None if impossible."""
+def predict_origin(series, model_name, origin, country, horizon: int = HORIZON, weather=None, memo=None):
+    """Forecast ``horizon`` hours from ``origin`` using only data before it. None if impossible.
+
+    ``memo`` caches forecasts per (origin, model) so a composite model (ensemble) reuses the
+    forecasts of its components instead of fitting them again.
+    """
+    memo = {} if memo is None else memo
+    key = (origin, model_name)
+    if key in memo:
+        return memo[key]
+
     train = series[series.index < origin]
     if len(train) < MIN_HISTORY_HOURS or train.index[-1] != origin - HOUR:
+        memo[key] = None
         return None
-    pred = MODELS[model_name](train, horizon, country)
-    pred = pred.assign(actual=series.reindex(pred.index).to_numpy(dtype=float))
-    pred["origin"] = origin
-    pred.index.name = "ds"
-    return pred.reset_index()
+
+    if model_name in COMPOSITES:
+        parts = [
+            predict_origin(series, part, origin, country, horizon, weather, memo)
+            for part in COMPOSITES[model_name]
+        ]
+        if any(part is None for part in parts):
+            memo[key] = None
+            return None
+        pred = parts[0].copy()
+        pred["yhat"] = np.mean([part["yhat"].to_numpy() for part in parts], axis=0)
+        pred["yhat_lower"] = np.nan
+        pred["yhat_upper"] = np.nan
+    else:
+        pred = MODELS[model_name](train, horizon, country, weather)
+        pred = pred.assign(actual=series.reindex(pred.index).to_numpy(dtype=float))
+        pred["origin"] = origin
+        pred.index.name = "ds"
+        pred = pred.reset_index()
+    memo[key] = pred
+    return pred
 
 
-def collect_predictions(series, names, country, n_origins: int, horizon: int = HORIZON):
+def collect_predictions(series, names, country, n_origins: int, horizon: int = HORIZON, weather=None):
     """Backtest predictions for every candidate. Returns (DataFrame, {model: failures})."""
-    frames, failures = [], {name: 0 for name in names}
+    frames, failures, memo = [], {name: 0 for name in names}, {}
     for origin in complete_origins(series, n_origins, horizon):
         for name in names:
             try:
-                pred = predict_origin(series, name, origin, country, horizon)
+                pred = predict_origin(series, name, origin, country, horizon, weather, memo)
             except Exception:  # a single model failing must not stop the run
                 failures[name] += 1
                 continue
@@ -72,13 +110,13 @@ def select_champion(table: pd.DataFrame, margin: float = MARGIN) -> str:
     return table["mape_pct"].idxmin()  # model not in SIMPLICITY
 
 
-def champion_residuals(series, champion, country, preds: pd.DataFrame, horizon: int = HORIZON):
+def champion_residuals(series, champion, country, preds: pd.DataFrame, horizon: int = HORIZON, weather=None):
     """Hourly (actual, yhat) of the champion on backtest days plus today's partial day."""
     res = preds[preds["model"] == champion][["ds", "actual", "yhat"]]
     today = series.index[-1].floor("D")
     if not (preds["origin"] == today).any():  # today's forecast is only partly observed
         try:
-            part = predict_origin(series, champion, today, country, horizon)
+            part = predict_origin(series, champion, today, country, horizon, weather)
         except Exception:
             part = None
         if part is not None:

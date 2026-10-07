@@ -26,7 +26,8 @@ from pipeline.champion import (
     select_champion,
 )
 from pipeline.history import HistoryError, load_history, synthetic_history
-from pipeline.models import DEFAULT_MODELS, HORIZON, MODELS
+from pipeline.models import DEFAULT_MODELS, HORIZON, MODELS, run_model
+from pipeline.weather import WeatherError, load_weather, synthetic_weather
 
 SCHEMA_VERSION = 1
 DEFAULT_OUT = Path(__file__).resolve().parent / "out" / "forecast.json"
@@ -35,28 +36,33 @@ INTERVAL_QUANTILES = (0.10, 0.90)  # -> an empirical 80% prediction interval
 LABELS = {
     "seasonal_naive": "Seasonal naive (same hour last week)",
     "naive_avg3": "3-week seasonal average",
+    "naive_daytype": "Holiday-aware 3-week average",
+    "naive_level": "Level-adjusted weekly pattern",
     "ensemble": "Ensemble (Prophet + 3-week average)",
-    "prophet_tuned": "Prophet (weekday/weekend)",
+    "ensemble_temp": "Ensemble (Prophet + temperature, level-adjusted)",
+    "prophet_tuned": "Prophet (weekday/off-day curves)",
+    "prophet_temp": "Prophet + temperature",
     "prophet": "Prophet",
     "ets": "Holt-Winters (ETS)",
 }
+TEMPERATURE_MODELS = {"prophet_temp", "ensemble_temp"}
 
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def build_country_entry(country: str, series: pd.Series, candidates, n_origins: int) -> dict:
+def build_country_entry(country: str, series: pd.Series, candidates, n_origins: int, weather=None) -> dict:
     """Backtest the candidates, choose the champion, forecast and check anomalies."""
-    preds, failures = collect_predictions(series, candidates, country, n_origins)
+    preds, failures = collect_predictions(series, candidates, country, n_origins, weather=weather)
     table = score_table(preds)
     champion = select_champion(table)
 
-    residuals = champion_residuals(series, champion, country, preds)
+    residuals = champion_residuals(series, champion, country, preds, weather=weather)
     rel = ((residuals["actual"] - residuals["yhat"]) / residuals["yhat"]).to_numpy()
     q_lo, q_hi = np.quantile(rel, INTERVAL_QUANTILES)
 
-    forecast = MODELS[champion](series, HORIZON, country)
+    forecast = run_model(champion, series, HORIZON, country, weather)
     if not np.isfinite(forecast["yhat"].to_numpy()).all():
         raise ValueError(f"{champion} produced a non-finite forecast")
 
@@ -73,6 +79,7 @@ def build_country_entry(country: str, series: pd.Series, candidates, n_origins: 
         "model": champion,
         "model_label": LABELS.get(champion, champion),
         "data_until": series.index[-1].strftime("%Y-%m-%dT%H:%MZ"),
+        "inputs": {"temperature": champion in TEMPERATURE_MODELS},
         "backtest": {
             "origins": int(preds["origin"].nunique()),
             "mape_pct": round(float(table.loc[champion, "mape_pct"]), 2),
@@ -110,7 +117,7 @@ def write_atomic(path: Path, payload: dict) -> None:
     os.replace(tmp, path)
 
 
-def run(countries, candidates, n_origins, history_days, synthetic, previous) -> dict:
+def run(countries, candidates, n_origins, history_days, synthetic, previous, use_weather=True) -> dict:
     entries, failed = {}, {}
     for i, country in enumerate(countries):
         started = time.perf_counter()
@@ -121,7 +128,15 @@ def run(countries, candidates, n_origins, history_days, synthetic, previous) -> 
                 if synthetic
                 else load_history(country, history_days)
             )
-            entry = build_country_entry(country, series, candidates, n_origins)
+            weather = None
+            if use_weather:
+                try:
+                    weather = (
+                        synthetic_weather(series, seed=i) if synthetic else load_weather(country, history_days)
+                    )
+                except WeatherError as exc:
+                    print(f"[{country}] temperature unavailable, temperature models skipped: {exc}", flush=True)
+            entry = build_country_entry(country, series, candidates, n_origins, weather)
         except (HistoryError, ValueError) as exc:
             failed[country] = str(exc)[:200]
             print(f"[{country}] FAILED: {failed[country]}", flush=True)
@@ -153,6 +168,7 @@ def main(argv=None) -> int:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     parser.add_argument("--previous", help="earlier forecast.json to fall back on per country")
     parser.add_argument("--synthetic", action="store_true", help="fake data, no API key needed")
+    parser.add_argument("--no-weather", action="store_true", help="do not load temperatures")
     args = parser.parse_args(argv)
     candidates = list(dict.fromkeys(["seasonal_naive"] + args.candidates))
 
@@ -163,6 +179,7 @@ def main(argv=None) -> int:
         args.history_days,
         args.synthetic,
         load_previous(args.previous),
+        use_weather=not args.no_weather,
     )
     fresh = [c for c, e in result["countries"].items() if not e.get("carried_over")]
     if not fresh:

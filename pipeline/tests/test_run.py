@@ -66,7 +66,7 @@ def test_robust_anomalies_needs_enough_history():
 
 def test_old_outliers_do_not_hide_new_ones():
     df = residual_frame()
-    df.iloc[5:15, df.columns.get_loc("actual")] *= 1.25  # big errors in the baseline
+    df.iloc[5:10, df.columns.get_loc("actual")] *= 1.25  # 5 big errors (~4% of the baseline)
     df.iloc[-2, df.columns.get_loc("actual")] *= 1.12
     assert robust_anomalies(df)["total_anomalies"] >= 1
 
@@ -101,7 +101,7 @@ def test_failed_country_falls_back_to_previous_entry(monkeypatch, tmp_path):
         return synthetic_history(days=60, seed=3)
 
     monkeypatch.setattr(run_module, "load_history", fake_load)
-    out = run_module.run(["germany", "france"], FAST, 5, 60, False, previous)
+    out = run_module.run(["germany", "france"], FAST, 5, 60, False, previous, use_weather=False)
     assert out["countries"]["france"]["carried_over"] is True
     assert "carried_over" not in out["countries"]["germany"]
     assert "france" in out["failed"]

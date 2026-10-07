@@ -70,14 +70,16 @@ def test_score_handles_missing_and_interval_coverage():
 
 @pytest.mark.parametrize("name", list(MODELS))
 def test_every_model_returns_24_finite_hours(name):
+    from pipeline.weather import synthetic_weather
+
     s = synthetic_history(days=45)
-    pred = MODELS[name](s)
+    pred = MODELS[name](s, HORIZON, "germany", synthetic_weather(s))
     assert list(pred.index) == list(future_index(s))
     assert len(pred) == HORIZON and np.isfinite(pred["yhat"]).all()
 
 
 def test_backtest_survives_a_failing_model(monkeypatch):
-    def boom(train, horizon=24, country=None):
+    def boom(train, horizon=24, country=None, weather=None):
         raise RuntimeError("model exploded")
 
     monkeypatch.setitem(MODELS, "broken", boom)

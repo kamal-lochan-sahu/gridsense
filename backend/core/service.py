@@ -135,6 +135,7 @@ def _pipeline_anomalies(country: str):
             "threshold": found["threshold"],
             "window_hours": found["window_hours"],
             "typical_error_pct": found.get("typical_error_pct"),
+            "window_level_pct": found.get("window_level_pct"),
             "total_anomalies": found["total_anomalies"],
             "anomalies": [
                 {

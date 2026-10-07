@@ -41,6 +41,7 @@ def entry(model="naive_avg3", anomalies=None, **extra):
             "threshold": 3.5,
             "window_hours": 24,
             "typical_error_pct": 2.43,
+            "window_level_pct": 5.1,
             "total_anomalies": 1,
             "items": [
                 {
@@ -150,6 +151,7 @@ def test_anomalies_come_from_the_pipeline_without_touching_entsoe(monkeypatch, p
     assert item["time"] == "2026-10-02T10:00Z" and item["z_score"] == 5.01 and item["deviation"] == "HIGH"
     assert item["expected_mw"] == 57663.0 and item["deviation_pct"] == 12.53
     assert body["country"] == "Germany" and body["method"].startswith("forecast-residual")
+    assert body["window_level_pct"] == 5.1
 
 
 @pytest.mark.parametrize(

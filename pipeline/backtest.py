@@ -13,8 +13,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from pipeline.champion import predict_origin
 from pipeline.history import HistoryError, load_history, synthetic_history
-from pipeline.models import DEFAULT_MODELS, HORIZON, MODELS, future_index
+from pipeline.models import DEFAULT_MODELS, HORIZON, MODELS
+from pipeline.weather import WeatherError, load_weather, synthetic_weather
 
 OUT_DIR = Path(__file__).resolve().parent / "out"
 
@@ -39,19 +41,16 @@ def score(actual: np.ndarray, pred: pd.DataFrame) -> dict:
     }
 
 
-def run_backtest(series: pd.Series, model_names, n_origins: int = 7, horizon: int = HORIZON, country=None):
-    rows = []
+def run_backtest(series, model_names, n_origins: int = 7, horizon: int = HORIZON, country=None, weather=None):
+    rows, memo = [], {}
     for origin in rolling_origins(series, n_origins, horizon):
-        train = series[series.index < origin]
-        if len(train) < 24 * 14:
-            continue
-        idx = future_index(train, horizon)
-        actual = series.reindex(idx).to_numpy(dtype=float)
         for name in model_names:
             started = time.perf_counter()
             try:
-                pred = MODELS[name](train, horizon, country)
-                result = score(actual, pred)
+                pred = predict_origin(series, name, origin, country, horizon, weather, memo)
+                if pred is None:  # not enough clean history before this origin
+                    continue
+                result = score(pred["actual"].to_numpy(dtype=float), pred)
                 error = None
             except Exception as exc:  # one failing model must not stop the comparison
                 result = {"mae": np.nan, "mape": np.nan, "coverage": np.nan}
@@ -94,6 +93,7 @@ def main(argv=None) -> int:
     parser.add_argument("--history-days", type=int, default=90)
     parser.add_argument("--origins", type=int, default=14)
     parser.add_argument("--synthetic", action="store_true", help="use fake data (no API key needed)")
+    parser.add_argument("--no-weather", action="store_true", help="skip temperature (temperature models then fail)")
     args = parser.parse_args(argv)
     args.models = list(dict.fromkeys(["seasonal_naive"] + args.models))  # baseline is always needed
 
@@ -114,7 +114,13 @@ def main(argv=None) -> int:
             f"{series.index[-1]:%Y-%m-%d %H:%M} UTC; backtesting {args.models}...",
             flush=True,
         )
-        res = run_backtest(series, args.models, args.origins, country=country)
+        weather = None
+        if not args.no_weather:
+            try:
+                weather = synthetic_weather(series, seed=i) if args.synthetic else load_weather(country, args.history_days)
+            except WeatherError as exc:
+                print(f"[{country}] temperature unavailable: {exc}")
+        res = run_backtest(series, args.models, args.origins, country=country, weather=weather)
         res.insert(0, "country", country)
         all_results.append(res)
 
