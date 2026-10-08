@@ -10,7 +10,7 @@ from core.config import (
     ENERGY_TTL_SECONDS,
     FORECAST_MAX_STALE_SECONDS,
     FORECAST_TTL_SECONDS,
-    FORECAST_URL,
+    FORECAST_URLS,
     MAX_STALE_SECONDS,
     PIPELINE_MAX_AGE_HOURS,
     WEATHER_TTL_SECONDS,
@@ -68,11 +68,21 @@ def get_all_energy() -> list:
     return available
 
 
+def _download_forecast_file() -> dict:
+    """First URL that works; later URLs are fallbacks."""
+    last_error = UpstreamError("no forecast URL configured")
+    for url in FORECAST_URLS:
+        try:
+            return fetcher.fetch_forecast_file(url)
+        except UpstreamError as exc:
+            log.warning("Forecast file unavailable from %s: %s", url.split("/")[2], exc)
+            last_error = exc
+    raise last_error
+
+
 def _pipeline_file() -> tuple:
     """``(forecast.json content, is_stale)``; raises UpstreamError if never loaded."""
-    return forecast_cache.get_or_load(
-        "forecast:file", FORECAST_TTL_SECONDS, lambda: fetcher.fetch_forecast_file(FORECAST_URL)
-    )
+    return forecast_cache.get_or_load("forecast:file", FORECAST_TTL_SECONDS, _download_forecast_file)
 
 
 def _age_hours(timestamp: str) -> float:

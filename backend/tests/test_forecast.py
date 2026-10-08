@@ -201,3 +201,40 @@ def test_fetch_forecast_file_validates_the_payload(monkeypatch):
         with_response(bad)
         with pytest.raises(UpstreamError):
             REAL_FETCH_FORECAST_FILE("https://x")
+
+
+def test_second_url_is_used_when_the_first_fails(monkeypatch):
+    seen = []
+
+    def fake_fetch(url):
+        seen.append(url)
+        if url == "https://primary.example/forecast.json":
+            raise UpstreamError("HTTP 404")
+        return payload()
+
+    monkeypatch.setattr(service, "FORECAST_URLS", ("https://primary.example/forecast.json", "https://fallback.example/forecast.json"))
+    monkeypatch.setattr(fetcher, "fetch_forecast_file", fake_fetch)
+    assert client.get("/forecast/germany").json()["source"] == "pipeline"
+    assert seen == ["https://primary.example/forecast.json", "https://fallback.example/forecast.json"]
+
+
+def test_primary_url_wins_and_fallback_is_not_touched(monkeypatch):
+    seen = []
+    monkeypatch.setattr(service, "FORECAST_URLS", ("https://primary.example/f.json", "https://fallback.example/f.json"))
+    monkeypatch.setattr(fetcher, "fetch_forecast_file", lambda url: seen.append(url) or payload())
+    client.get("/forecast/germany")
+    assert seen == ["https://primary.example/f.json"]
+
+
+def test_all_urls_failing_means_no_pipeline_forecast(monkeypatch):
+    monkeypatch.setattr(service, "FORECAST_URLS", ("https://a.example/f.json", "https://b.example/f.json"))
+    monkeypatch.setattr(fetcher, "fetch_forecast_file", lambda url: (_ for _ in ()).throw(UpstreamError("down")))
+    assert client.get("/forecast/spain").status_code == 502
+    assert client.get("/forecast/germany").json()["source"] == "static"
+
+
+def test_default_forecast_url_is_the_release_asset_not_a_branch():
+    from core import config
+
+    assert config.FORECAST_URL.endswith("/releases/download/forecast-data/forecast.json")
+    assert config.FORECAST_URLS[0] == config.FORECAST_URL
