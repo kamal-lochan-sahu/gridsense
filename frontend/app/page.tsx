@@ -14,7 +14,14 @@ import {
 import { getJson } from "@/lib/api";
 import { formatDateTime, formatTime } from "@/lib/format";
 import { currentHourIndex } from "@/lib/weather";
-import type { AnomalyData, EnergyData, ForecastData, WeatherData } from "@/lib/types";
+import type {
+  AnomalyData,
+  EnergyData,
+  ForecastData,
+  TrackRecordData,
+  TrackRecordWindow,
+  WeatherData,
+} from "@/lib/types";
 
 const REFRESH_INTERVAL = 5 * 60 * 1000;
 const EXPECTED_COUNTRIES = ["Germany", "France", "Spain", "Poland"];
@@ -28,6 +35,95 @@ const TOOLTIP_STYLE = {
 
 function describeError(reason: unknown): string {
   return reason instanceof Error ? reason.message : "unknown error";
+}
+
+const TRACK_ROWS: Array<{ key: string; label: string }> = [
+  { key: "7d", label: "Last 7 days" },
+  { key: "14d", label: "Last 14 days" },
+];
+
+function TrackRecordCard({ data }: { data: TrackRecordData }) {
+  const hasTso = data.sources.includes("tso");
+  const chartData = data.hourly.map((h) => ({
+    time: h.ds.slice(5, 16),
+    actual: h.actual,
+    gridsense: h.gridsense,
+    tso: h.tso ?? undefined,
+  }));
+
+  const cell = (window: TrackRecordWindow, value: number | undefined) => {
+    if (value === undefined) return <td className="py-2 pr-4 text-gray-500">n/a</td>;
+    const candidates = [window.gridsense, window.naive, window.tso].filter(
+      (v): v is number => v !== undefined
+    );
+    const best = value === Math.min(...candidates);
+    return (
+      <td className={`py-2 pr-4 ${best ? "text-green-400 font-semibold" : "text-gray-300"}`}>
+        {value.toFixed(2)}%
+      </td>
+    );
+  };
+
+  return (
+    <div className="bg-gray-900 rounded-xl p-4 md:p-6 mb-6 border border-green-800">
+      <h2 className="text-base md:text-lg font-semibold mb-1 text-green-400">
+        Track record — {data.country}: day-ahead accuracy
+      </h2>
+      <p className="text-gray-500 text-xs mb-4">
+        Each day is forecast at {data.origin_hour_utc}:00 UTC the day before
+        {hasTso ? ", about when the grid operator (TSO) publishes its own forecast," : ""} and then compared with
+        what really happened. Error is the average percentage miss; lower is better, green is the best.
+      </p>
+      <div className="overflow-x-auto mb-4">
+        <table className="text-sm">
+          <thead>
+            <tr className="text-gray-400 text-xs text-left">
+              <th className="py-2 pr-4 font-normal">Average error</th>
+              <th className="py-2 pr-4 font-normal">GridSense</th>
+              {hasTso && <th className="py-2 pr-4 font-normal">TSO day-ahead</th>}
+              <th className="py-2 pr-4 font-normal">Same hour last week</th>
+            </tr>
+          </thead>
+          <tbody>
+            {TRACK_ROWS.filter((row) => data.summary[row.key]).map((row) => {
+              const window = data.summary[row.key];
+              return (
+                <tr key={row.key} className="border-t border-gray-800">
+                  <td className="py-2 pr-4 text-gray-400">{row.label}</td>
+                  {cell(window, window.gridsense)}
+                  {hasTso && cell(window, window.tso)}
+                  {cell(window, window.naive)}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-gray-500 text-xs mb-2">Last 3 days, hourly (UTC) — model: {data.model}</p>
+      <ResponsiveContainer width="100%" height={250}>
+        <LineChart data={chartData}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+          <XAxis dataKey="time" stroke="#9CA3AF" tick={{ fontSize: 11 }} minTickGap={40} />
+          <YAxis stroke="#9CA3AF" tick={{ fontSize: 11 }} domain={["auto", "auto"]} />
+          <Tooltip contentStyle={TOOLTIP_STYLE} />
+          <Legend />
+          <Line type="monotone" dataKey="actual" stroke="#F3F4F6" strokeWidth={2} dot={false} name="Actual (MW)" />
+          <Line type="monotone" dataKey="gridsense" stroke="#60A5FA" strokeWidth={2} dot={false} name="GridSense (MW)" />
+          {hasTso && (
+            <Line
+              type="monotone"
+              dataKey="tso"
+              stroke="#FB923C"
+              strokeWidth={1.5}
+              dot={false}
+              strokeDasharray="4 3"
+              name="TSO day-ahead (MW)"
+            />
+          )}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
 }
 
 function SplashScreen() {
@@ -86,6 +182,7 @@ export default function Home() {
   const [weatherData, setWeatherData] = useState<WeatherData[]>([]);
   const [forecastData, setForecastData] = useState<ForecastData | null>(null);
   const [forecastError, setForecastError] = useState<string | null>(null);
+  const [trackRecord, setTrackRecord] = useState<TrackRecordData | null>(null);
   const [anomalyData, setAnomalyData] = useState<AnomalyData | null>(null);
   const [selectedCountry, setSelectedCountry] = useState("germany");
   const [loading, setLoading] = useState(true);
@@ -154,6 +251,18 @@ export default function Home() {
         if (controller.signal.aborted) return;
         setForecastData(null);
         setForecastError(describeError(reason));
+      });
+    return () => controller.abort();
+  }, [selectedCountry, refreshCount]);
+
+  // The track record is an extra: if it is missing (404) or fails, the card is simply not shown.
+  useEffect(() => {
+    if (refreshCount === 0) return;
+    const controller = new AbortController();
+    getJson<TrackRecordData>(`/trackrecord/${selectedCountry}`, controller.signal)
+      .then((data) => setTrackRecord(data.status === "success" ? data : null))
+      .catch(() => {
+        if (!controller.signal.aborted) setTrackRecord(null);
       });
     return () => controller.abort();
   }, [selectedCountry, refreshCount]);
@@ -441,6 +550,11 @@ export default function Home() {
             </LineChart>
           </ResponsiveContainer>
         </div>
+      )}
+
+      {/* Track record: GridSense vs the TSO's own day-ahead forecast */}
+      {trackRecord && trackRecord.country.toLowerCase() === selectedCountry && (
+        <TrackRecordCard data={trackRecord} />
       )}
 
       {/* Weather Cards */}

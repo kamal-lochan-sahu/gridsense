@@ -28,11 +28,12 @@ class HistoryError(Exception):
     """History could not be loaded."""
 
 
-def _fetch_chunk(country_code: str, start: datetime, end: datetime, token: str) -> str:
+def _fetch_chunk(country_code: str, start: datetime, end: datetime, token: str, process: str = "A16") -> str:
+    """process A16 = realised load, A01 = the TSO's day-ahead forecast."""
     params = {
         "securityToken": token,
         "documentType": "A65",
-        "processType": "A16",
+        "processType": process,
         "outBiddingZone_Domain": country_code,
         "periodStart": start.strftime("%Y%m%d%H00"),
         "periodEnd": end.strftime("%Y%m%d%H00"),
@@ -67,8 +68,8 @@ def to_hourly(series_points: list) -> pd.Series:
     return hourly
 
 
-def load_history(country: str, days: int = 90) -> pd.Series:
-    """Hourly load (MW) for the last ``days`` days, UTC index."""
+def load_history(country: str, days: int = 90, process: str = "A16") -> pd.Series:
+    """Hourly load (MW) for the last ``days`` days, UTC index (process A16 = realised, A01 = TSO day-ahead)."""
     token = os.getenv("ENTSOE_API_KEY")
     if not token:
         raise HistoryError("ENTSOE_API_KEY is not configured")
@@ -80,7 +81,7 @@ def load_history(country: str, days: int = 90) -> pd.Series:
     cursor = start
     while cursor < end:
         chunk_end = min(cursor + timedelta(days=CHUNK_DAYS), end)
-        parsed = parse_energy_xml(_fetch_chunk(code, cursor, chunk_end, token), country)
+        parsed = parse_energy_xml(_fetch_chunk(code, cursor, chunk_end, token, process), country)
         if parsed["status"] == "success":
             for p in parsed["series"]:
                 if p["load_mw"] is not None:
@@ -92,6 +93,17 @@ def load_history(country: str, days: int = 90) -> pd.Series:
     if not points:
         raise HistoryError(f"no data returned for {country}")
     return to_hourly([{"time": t, "load_mw": v} for t, v in points.items()])
+
+
+def load_tso_forecast(country: str, days: int = 90) -> pd.Series:
+    """The TSO's own published day-ahead load forecast (MW, hourly, UTC)."""
+    return load_history(country, days, process="A01")
+
+
+def synthetic_tso(actual: pd.Series, seed: int = 0) -> pd.Series:
+    """A plausible fake TSO forecast: the actual load with ~1.5% error (tests / offline runs)."""
+    rng = np.random.default_rng(seed + 1000)
+    return actual * (1 + rng.normal(0, 0.015, len(actual)))
 
 
 def synthetic_history(days: int = 90, seed: int = 0, base: float = 50000.0) -> pd.Series:

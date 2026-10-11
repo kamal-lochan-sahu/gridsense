@@ -25,8 +25,9 @@ from pipeline.champion import (
     score_table,
     select_champion,
 )
-from pipeline.history import HistoryError, load_history, synthetic_history
+from pipeline.history import HistoryError, load_history, load_tso_forecast, synthetic_history, synthetic_tso
 from pipeline.models import DEFAULT_MODELS, HORIZON, MODELS, run_model
+from pipeline.trackrecord import build_track_record
 from pipeline.weather import WeatherError, load_weather, synthetic_weather
 
 SCHEMA_VERSION = 1
@@ -52,7 +53,7 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def build_country_entry(country: str, series: pd.Series, candidates, n_origins: int, weather=None) -> dict:
+def build_country_entry(country: str, series: pd.Series, candidates, n_origins: int, weather=None, tso=None) -> dict:
     """Backtest the candidates, choose the champion, forecast and check anomalies."""
     preds, failures = collect_predictions(series, candidates, country, n_origins, weather=weather)
     table = score_table(preds)
@@ -65,6 +66,12 @@ def build_country_entry(country: str, series: pd.Series, candidates, n_origins: 
     forecast = run_model(champion, series, HORIZON, country, weather)
     if not np.isfinite(forecast["yhat"].to_numpy()).all():
         raise ValueError(f"{champion} produced a non-finite forecast")
+
+    try:
+        track_record = build_track_record(series, champion, country, weather, tso)
+    except Exception as exc:  # the forecast must never be lost because of the track record
+        print(f"[{country}] track record skipped: {type(exc).__name__}: {exc}", flush=True)
+        track_record = None
 
     predictions = [
         {
@@ -96,6 +103,7 @@ def build_country_entry(country: str, series: pd.Series, candidates, n_origins: 
         },
         "predictions": predictions,
         "anomalies": robust_anomalies(residuals),
+        "track_record": track_record,
     }
 
 
@@ -117,7 +125,7 @@ def write_atomic(path: Path, payload: dict) -> None:
     os.replace(tmp, path)
 
 
-def run(countries, candidates, n_origins, history_days, synthetic, previous, use_weather=True) -> dict:
+def run(countries, candidates, n_origins, history_days, synthetic, previous, use_weather=True, use_tso=True) -> dict:
     entries, failed = {}, {}
     for i, country in enumerate(countries):
         started = time.perf_counter()
@@ -136,7 +144,13 @@ def run(countries, candidates, n_origins, history_days, synthetic, previous, use
                     )
                 except WeatherError as exc:
                     print(f"[{country}] temperature unavailable, temperature models skipped: {exc}", flush=True)
-            entry = build_country_entry(country, series, candidates, n_origins, weather)
+            tso = None
+            if use_tso:
+                try:
+                    tso = synthetic_tso(series, seed=i) if synthetic else load_tso_forecast(country, history_days)
+                except HistoryError as exc:
+                    print(f"[{country}] TSO forecast unavailable, track record without it: {exc}", flush=True)
+            entry = build_country_entry(country, series, candidates, n_origins, weather, tso)
         except (HistoryError, ValueError) as exc:
             failed[country] = str(exc)[:200]
             print(f"[{country}] FAILED: {failed[country]}", flush=True)
@@ -169,6 +183,7 @@ def main(argv=None) -> int:
     parser.add_argument("--previous", help="earlier forecast.json to fall back on per country")
     parser.add_argument("--synthetic", action="store_true", help="fake data, no API key needed")
     parser.add_argument("--no-weather", action="store_true", help="do not load temperatures")
+    parser.add_argument("--no-tso", action="store_true", help="do not load the TSO day-ahead forecast")
     args = parser.parse_args(argv)
     candidates = list(dict.fromkeys(["seasonal_naive"] + args.candidates))
 
@@ -180,6 +195,7 @@ def main(argv=None) -> int:
         args.synthetic,
         load_previous(args.previous),
         use_weather=not args.no_weather,
+        use_tso=not args.no_tso,
     )
     fresh = [c for c, e in result["countries"].items() if not e.get("carried_over")]
     if not fresh:

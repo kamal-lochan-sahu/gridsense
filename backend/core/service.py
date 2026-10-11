@@ -127,6 +127,23 @@ def get_forecast(country: str) -> dict:
     raise UpstreamError(f"No forecast available for {name}")
 
 
+def get_track_record(country: str):
+    """Walk-forward accuracy of GridSense vs the TSO day-ahead forecast, or None if the pipeline
+    file has no track record for this country yet. Raises UpstreamError if the file is unavailable."""
+    data, stale = _pipeline_file()
+    entry = data["countries"].get(country)
+    record = entry.get("track_record") if isinstance(entry, dict) else None
+    if not record:
+        return None
+    return {
+        "status": "success",
+        "country": country.capitalize(),
+        "generated_at": data.get("generated_at"),
+        "stale": stale,
+        **record,
+    }
+
+
 def _pipeline_anomalies(country: str):
     """Residual-based anomalies from the pipeline, or None if missing, too old or unusable."""
     try:

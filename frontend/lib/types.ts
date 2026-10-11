@@ -70,3 +70,33 @@ export interface AnomalyData {
   typical_error_pct?: number;
   anomalies: AnomalyPoint[];
 }
+
+export interface TrackRecordWindow {
+  days: number;
+  hours: number;
+  gridsense: number; // mean absolute percentage error, lower is better
+  naive: number;
+  tso?: number; // missing when the TSO forecast could not be downloaded
+}
+
+export interface TrackRecordHour {
+  ds: string; // UTC, "YYYY-MM-DD HH:MM:SS"
+  actual: number;
+  gridsense: number;
+  naive: number;
+  tso?: number | null;
+}
+
+export interface TrackRecordData {
+  status: string;
+  country: string;
+  model: string;
+  method: string;
+  origin_hour_utc: number;
+  sources: string[];
+  summary: Record<string, TrackRecordWindow>; // keys "7d" and "14d"
+  daily: Array<{ date: string; gridsense: number; naive: number; tso?: number }>;
+  hourly: TrackRecordHour[];
+  generated_at?: string;
+  stale?: boolean;
+}

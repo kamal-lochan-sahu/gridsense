@@ -238,3 +238,39 @@ def test_default_forecast_url_is_the_release_asset_not_a_branch():
 
     assert config.FORECAST_URL.endswith("/releases/download/forecast-data/forecast.json")
     assert config.FORECAST_URLS[0] == config.FORECAST_URL
+
+
+def track_record_payload():
+    return {
+        "method": "Walk-forward ...",
+        "model": "naive_level",
+        "origin_hour_utc": 11,
+        "sources": ["gridsense", "tso", "naive"],
+        "summary": {
+            "7d": {"days": 7, "hours": 168, "gridsense": 2.1, "tso": 1.8, "naive": 3.0},
+            "14d": {"days": 14, "hours": 336, "gridsense": 2.3, "tso": 1.9, "naive": 3.2},
+        },
+        "daily": [{"date": "2026-10-02", "gridsense": 2.0, "tso": 1.7, "naive": 3.1}],
+        "hourly": [{"ds": "2026-10-02 10:00:00", "actual": 60000.0, "gridsense": 59000.0, "tso": 60500.0, "naive": 57000.0}],
+    }
+
+
+def test_track_record_endpoint_returns_the_pipeline_record(pipeline):
+    pipeline["data"] = payload({"germany": entry(track_record=track_record_payload())})
+    body = client.get("/trackrecord/germany").json()
+    assert body["status"] == "success" and body["country"] == "Germany" and body["stale"] is False
+    assert body["summary"]["7d"]["tso"] == 1.8 and body["sources"] == ["gridsense", "tso", "naive"]
+    assert body["hourly"][0]["actual"] == 60000.0 and body["generated_at"]
+
+
+def test_track_record_is_404_when_the_file_has_none_yet(pipeline):
+    assert client.get("/trackrecord/germany").status_code == 404  # entry without track_record
+    pipeline["data"] = payload({"germany": entry(track_record=None)})
+    assert client.get("/trackrecord/germany").status_code == 404
+    assert client.get("/trackrecord/spain").status_code == 404  # country missing from the file entirely
+
+
+def test_track_record_unknown_country_and_unavailable_file(pipeline):
+    assert client.get("/trackrecord/atlantis").status_code == 404
+    pipeline["data"] = UpstreamError("down")
+    assert client.get("/trackrecord/germany").status_code == 502

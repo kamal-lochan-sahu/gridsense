@@ -99,6 +99,15 @@ def get_country_forecast(country: str):
     return service.get_forecast(_known_country(country))
 
 
+@app.get("/trackrecord/{country}")
+def get_track_record(country: str):
+    """How GridSense's day-ahead forecasts compared with the TSO's own over the last two weeks."""
+    result = service.get_track_record(_known_country(country))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Track record not available yet")
+    return result
+
+
 @app.get("/anomaly/{country}")
 def get_anomaly(country: str):
     """Unusual load values of one country (forecast-residual method, z-score fallback)."""

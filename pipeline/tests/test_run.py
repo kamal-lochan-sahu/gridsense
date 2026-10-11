@@ -101,7 +101,7 @@ def test_failed_country_falls_back_to_previous_entry(monkeypatch, tmp_path):
         return synthetic_history(days=60, seed=3)
 
     monkeypatch.setattr(run_module, "load_history", fake_load)
-    out = run_module.run(["germany", "france"], FAST, 5, 60, False, previous, use_weather=False)
+    out = run_module.run(["germany", "france"], FAST, 5, 60, False, previous, use_weather=False, use_tso=False)
     assert out["countries"]["france"]["carried_over"] is True
     assert "carried_over" not in out["countries"]["germany"]
     assert "france" in out["failed"]
