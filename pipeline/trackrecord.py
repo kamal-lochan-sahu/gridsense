@@ -39,22 +39,25 @@ def _number(value):
     return None if pd.isna(value) else round(float(value), 1)
 
 
-def day_ahead_frame(series, names, country, weather=None, n_days: int = TRACK_DAYS) -> pd.DataFrame:
+def day_ahead_frame(series, names, country, weather=None, n_days: int = TRACK_DAYS, failures=None) -> pd.DataFrame:
     """Walk-forward day-ahead forecasts of several models next to the realised load.
 
     One row per hour (UTC) of the last ``n_days`` complete days; columns ``actual`` and one per
     model that could run. For each day D the models see only data up to ORIGIN_HOUR_UTC - 1 hours
-    on the day before. Forecasts that could not be produced are NaN.
+    on the day before. Forecasts that could not be produced are NaN; pass a dict as ``failures`` to
+    learn why: it receives {model: "ErrorType: message (n days)"}.
     """
     horizon = (24 - ORIGIN_HOUR_UTC) + 24
-    memo, forecasts, actuals = {}, {name: [] for name in names}, []
+    memo, forecasts, actuals, errors = {}, {name: [] for name in names}, [], {}
     for day in target_days(series, n_days):
         origin = day - pd.Timedelta(hours=24 - ORIGIN_HOUR_UTC)
         actual_added = False
         for name in names:
             try:
                 pred = predict_origin(series, name, origin, country, horizon, weather, memo)
-            except Exception:  # a model that cannot run on a day is skipped, not fatal
+            except Exception as exc:  # a model that cannot run on a day is skipped, not fatal
+                kind, count = errors.get(name, (f"{type(exc).__name__}: {exc}", 0))
+                errors[name] = (kind, count + 1)
                 continue
             if pred is None:
                 continue
@@ -63,6 +66,8 @@ def day_ahead_frame(series, names, country, weather=None, n_days: int = TRACK_DA
             if not actual_added:
                 actuals.append(window["actual"])
                 actual_added = True
+    if failures is not None:
+        failures.update({name: f"{kind} ({count} days)" for name, (kind, count) in errors.items()})
     if not actuals:
         return pd.DataFrame(columns=["actual"])
     frame = pd.DataFrame({"actual": pd.concat(actuals)})

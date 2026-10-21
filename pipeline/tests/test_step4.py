@@ -162,7 +162,7 @@ def test_load_weather_retries_network_errors_then_succeeds(monkeypatch):
 
     monkeypatch.setattr(requests, "get", flaky)
     monkeypatch.setattr(weather_module.time, "sleep", lambda s: None)
-    assert len(load_weather("germany", 90)) == 4 and attempts["n"] == 3
+    assert len(load_weather("germany", 90)) == 4 and attempts["n"] >= 3  # retried, then also asked the archive
 
 
 def temp_driven_series(days=70, seed=0):

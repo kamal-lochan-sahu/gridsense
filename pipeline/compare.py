@@ -66,11 +66,14 @@ def main(argv=None) -> int:
         except HistoryError as exc:
             print("SKIPPED:", exc)
             continue
-        frame = day_ahead_frame(series, models, country, weather, args.days)
+        reasons = {}
+        frame = day_ahead_frame(series, models, country, weather, args.days, failures=reasons)
         frame["tso"] = tso.reindex(frame.index)
-        missing = [m for m in models if m not in frame]
-        if missing:
-            print("could not run:", ", ".join(missing))
+        for name in models:
+            if name not in frame:
+                print(f"could not run: {name} - {reasons.get(name, 'no forecast produced')}")
+            elif name in reasons:
+                print(f"partly failed: {name} - {reasons[name]}")
         table = compare_table(frame, models)
         print(table.to_string())
         ours = table.drop(index="tso", errors="ignore")

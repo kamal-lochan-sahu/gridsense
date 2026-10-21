@@ -1,17 +1,25 @@
 """Hourly, population-weighted air temperature per country from Open-Meteo.
 
-One request returns the recent past (modelled analysis) *and* the next days (forecast) for all
-cities of a country, so history and future come from the same source. No API key is needed.
+Two sources are combined, no API key is needed:
+  * the Historical Weather API (ERA5 reanalysis, gap-free, about 5 days behind) for the long history;
+  * the Forecast API for the last two weeks and the next days (it only keeps a few weeks of its own
+    past reliably: asking it for 90 days back returned ~50 days of nulls).
+Where both have a value the reanalysis wins. If the archive cannot be reached, the old single
+Forecast API call with a long ``past_days`` is used instead.
 Weights are rough metro-area populations in millions; they only need to be roughly right.
 """
 import time
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
 import requests
 
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
-MAX_PAST_DAYS = 92  # Open-Meteo limit
+ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
+MAX_PAST_DAYS = 92  # Open-Meteo limit of the forecast API
+RECENT_PAST_DAYS = 14  # the forecast API covers this many past days (plus the next ones)
+ARCHIVE_LAG_DAYS = 6  # ERA5 is about 5 days behind: ask the archive only up to this many days back
 FORECAST_DAYS = 3
 
 CITIES = {  # (latitude, longitude, weight)
@@ -44,23 +52,12 @@ def _weighted_mean(results: list, weights: np.ndarray) -> pd.Series:
     return series.sort_index()
 
 
-def load_weather(country: str, history_days: int = 90, forecast_days: int = FORECAST_DAYS) -> pd.Series:
-    """Hourly temperature (deg C, UTC index) covering the last days and the next ``forecast_days``."""
-    cities = CITIES.get(country)
-    if not cities:
-        raise WeatherError(f"no cities configured for {country}")
-    params = {
-        "latitude": ",".join(str(c[0]) for c in cities),
-        "longitude": ",".join(str(c[1]) for c in cities),
-        "hourly": "temperature_2m",
-        "past_days": min(history_days + 2, MAX_PAST_DAYS),
-        "forecast_days": forecast_days,
-        "timezone": "UTC",
-    }
+def _request_series(url: str, params: dict, cities: list) -> pd.Series:
+    """One Open-Meteo request for all cities of a country -> weighted hourly temperature."""
     last_error = "unknown"
     for attempt in range(3):
         try:
-            response = requests.get(OPEN_METEO_URL, params=params, timeout=(5, 30))
+            response = requests.get(url, params=params, timeout=(5, 30))
         except requests.RequestException as exc:
             last_error = type(exc).__name__
             time.sleep(1 + attempt)
@@ -84,6 +81,48 @@ def load_weather(country: str, history_days: int = 90, forecast_days: int = FORE
         raise WeatherError(f"Open-Meteo returned unusable data ({type(exc).__name__})") from None
     if series.isna().all():
         raise WeatherError("Open-Meteo returned no temperatures")
+    return series
+
+
+def load_weather(country: str, history_days: int = 90, forecast_days: int = FORECAST_DAYS) -> pd.Series:
+    """Hourly temperature (deg C, UTC index) covering the last days and the next ``forecast_days``."""
+    cities = CITIES.get(country)
+    if not cities:
+        raise WeatherError(f"no cities configured for {country}")
+    base = {
+        "latitude": ",".join(str(c[0]) for c in cities),
+        "longitude": ",".join(str(c[1]) for c in cities),
+        "hourly": "temperature_2m",
+        "timezone": "UTC",
+    }
+    today = datetime.now(timezone.utc).date()
+
+    recent = _request_series(
+        OPEN_METEO_URL, {**base, "past_days": RECENT_PAST_DAYS, "forecast_days": forecast_days}, cities
+    )
+    try:
+        archive = _request_series(
+            ARCHIVE_URL,
+            {
+                **base,
+                "start_date": (today - timedelta(days=history_days + 2)).isoformat(),
+                "end_date": (today - timedelta(days=ARCHIVE_LAG_DAYS)).isoformat(),
+            },
+            cities,
+        )
+    except WeatherError:
+        archive = None
+
+    if archive is not None:
+        series = archive.combine_first(recent)  # reanalysis first, the forecast API fills the rest
+    else:
+        series = _request_series(
+            OPEN_METEO_URL,
+            {**base, "past_days": min(history_days + 2, MAX_PAST_DAYS), "forecast_days": forecast_days},
+            cities,
+        )
+    series = series.sort_index()
+    series.name, series.index.name = "temp_c", "ds"
     return series
 
 
