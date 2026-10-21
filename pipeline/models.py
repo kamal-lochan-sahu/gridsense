@@ -28,6 +28,15 @@ LEVEL_HOURS = 24 * 7  # window used to measure the current load level
 LEVEL_CLIP = (0.9, 1.1)  # never rescale by more than +-10%
 PROPHET_TEMP_DAYS = 56  # shorter window for the temperature model: ignore the summer
 HDD_BASE, CDD_BASE = 16.0, 22.0  # heating / cooling degree-day thresholds (deg C)
+RECENT_DAYS = {"wd": 5, "sat": 3, "sun": 3}  # how many recent same-type days naive_recent averages
+RECENT_LOOKBACK_DAYS = 28
+HOURLY_FACTOR_CLIP = (0.85, 1.15)
+RIDGE_DAYS = 56  # training window of ridge_temp
+RIDGE_HALF_LIFE_DAYS = 14.0  # recent hours count more
+RIDGE_ALPHA = 1.0  # penalty on the temperature and trend terms only
+RIDGE_DUMMY_ALPHA = 1e-3  # the hour x day-type dummies behave like intercepts: (almost) unpenalised
+N_DUMMIES = 72
+TIME_BLOCKS = ((0, 5), (6, 11), (12, 17), (18, 23))  # local hours; temperature acts differently in each
 
 
 class MissingWeather(Exception):
@@ -175,6 +184,135 @@ def naive_level(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFr
     return _frame(base.index, base["yhat"].to_numpy() * level_factor(train, country))
 
 
+# ----------------------------------------------------------------------------- recent-days family
+
+
+def recent_reference(train: pd.Series, idx: pd.DatetimeIndex, country) -> np.ndarray:
+    """Mean of the same local hour on the most recent days of the same type (see pipeline.daytype).
+
+    Unlike the 1-3 weeks-back references this follows a drifting load (seasonal change) within
+    days. Hours that are not known yet (the part of yesterday after the forecast origin) are
+    skipped, so the next older day of the same type is used for them.
+    """
+    tz = tz_of(country)
+    lookup = _train_by_local_time(train, tz)
+    local = idx.tz_convert(tz).tz_localize(None)
+    dates = local.normalize()
+    out = np.full(len(local), np.nan)
+    for day_stamp in pd.unique(dates):
+        stamp = pd.Timestamp(day_stamp)
+        day = stamp.date()
+        cls = day_class(day, country)
+        mask = np.asarray(dates == stamp)
+        times = local[mask]
+        rows = []
+        for back in range(1, RECENT_LOOKBACK_DAYS + 1):
+            candidate = day - timedelta(days=back)
+            if day_class(candidate, country) == cls:
+                rows.append(lookup.reindex(times - pd.Timedelta(days=back)).to_numpy())
+        if not rows:
+            continue
+        stack = np.vstack(rows)  # most recent day first
+        valid = ~np.isnan(stack)
+        take = valid & (np.cumsum(valid, axis=0) <= RECENT_DAYS[cls])
+        count = take.sum(axis=0)
+        out[mask] = np.where(count > 0, np.where(take, stack, 0.0).sum(axis=0) / np.maximum(count, 1), np.nan)
+    return out
+
+
+def naive_recent(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
+    """Average of the last 5 weekdays (3 Saturdays / Sundays-and-holidays) at the same hour."""
+    idx = future_index(train, horizon)
+    ref = recent_reference(train, idx, country)
+    fallback = naive_daytype(train, horizon, country)["yhat"].to_numpy()
+    return _frame(idx, np.where(np.isnan(ref), fallback, ref))
+
+
+def hourly_level_factors(train: pd.Series, country, hours: int = LEVEL_HOURS) -> np.ndarray:
+    """24 multipliers (one per local hour): how the last week's load compares with the reference.
+
+    One overall level factor cannot fix a daily *shape* that is drifting (e.g. evenings falling
+    faster than mornings in autumn); one factor per hour of the day can.
+    """
+    tz = tz_of(country)
+    recent = train.index[-hours:]
+    ref = daytype_reference(train, recent, country)
+    actual = train.reindex(recent).to_numpy(dtype=float)
+    local_hour = recent.tz_convert(tz).hour.to_numpy()
+    factors = np.ones(24)
+    for hour in range(24):
+        ok = (local_hour == hour) & np.isfinite(ref) & np.isfinite(actual)
+        if ok.sum() >= 3:
+            factors[hour] = actual[ok].sum() / ref[ok].sum()
+    smoothed = (np.roll(factors, 1) + 2 * factors + np.roll(factors, -1)) / 4  # neighbouring hours share information
+    return np.clip(smoothed, *HOURLY_FACTOR_CLIP)
+
+
+def naive_level_hourly(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
+    """naive_daytype with a separate level correction for every hour of the day."""
+    base = naive_daytype(train, horizon, country)
+    hours = base.index.tz_convert(tz_of(country)).hour.to_numpy()
+    return _frame(base.index, base["yhat"].to_numpy() * hourly_level_factors(train, country)[hours])
+
+
+# ----------------------------------------------------------------------------- regression
+
+
+def _day_classes(local_dates, country) -> np.ndarray:
+    lookup = {d: day_class(d, country) for d in set(local_dates)}
+    return np.array([lookup[d] for d in local_dates])
+
+
+def _ridge_features(idx: pd.DatetimeIndex, country, temp: np.ndarray, t0: pd.Timestamp) -> np.ndarray:
+    """Hour-of-day x day-type dummies, heating/cooling degree days per part of the day, a trend."""
+    local = idx.tz_convert(tz_of(country))
+    hour = local.hour.to_numpy()
+    classes = _day_classes(list(local.date), country)
+    cols = []
+    for cls in ("wd", "sat", "sun"):
+        for h in range(24):
+            cols.append(((classes == cls) & (hour == h)).astype(float))
+    hdd, cdd = _degree_days(temp)
+    for start, end in TIME_BLOCKS:
+        block = ((hour >= start) & (hour <= end)).astype(float)
+        cols.append(block * hdd / 10.0)
+        cols.append(block * cdd / 10.0)
+    cols.append(((idx - t0) / pd.Timedelta(days=1)).to_numpy(dtype=float) / 30.0)
+    return np.column_stack(cols)
+
+
+def ridge_temp(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
+    """Weighted ridge regression on calendar + temperature, fitted on the last 8 weeks.
+
+    Recent hours get more weight (half-life two weeks) so a drifting load is followed. In a
+    backtest the temperatures are the measured ones (perfect foresight), as for prophet_temp.
+    """
+    if weather is None:
+        raise MissingWeather("no temperature series supplied")
+    train = train.tail(24 * RIDGE_DAYS)
+    idx = future_index(train, horizon)
+    past = weather.reindex(train.index).interpolate(limit=6, limit_direction="both")
+    if past.isna().mean() > 0.1:
+        raise MissingWeather("temperature history is incomplete")
+    ahead = weather.reindex(idx)
+    if ahead.isna().any():
+        raise MissingWeather("no temperature forecast for the whole horizon")
+
+    t0 = train.index[-1]
+    x_train = _ridge_features(train.index, country, past.ffill().bfill().to_numpy(dtype=float), t0)
+    x_future = _ridge_features(idx, country, ahead.to_numpy(dtype=float), t0)
+    y = train.to_numpy(dtype=float) / 1000.0
+    age_days = ((t0 - train.index) / pd.Timedelta(days=1)).to_numpy(dtype=float)
+    weights = 0.5 ** (age_days / RIDGE_HALF_LIFE_DAYS)
+    xw = x_train * weights[:, None]
+    penalty = np.r_[np.full(N_DUMMIES, RIDGE_DUMMY_ALPHA), np.full(x_train.shape[1] - N_DUMMIES, RIDGE_ALPHA)]
+    beta = np.linalg.solve(x_train.T @ xw + np.diag(penalty), xw.T @ y)
+    yhat = (x_future @ beta) * 1000.0
+    if not np.isfinite(yhat).all() or yhat.min() < 0.5 * float(train.tail(168).min()):
+        raise ValueError("ridge forecast is implausible")  # e.g. a day type that is missing from the window
+    return _frame(idx, yhat)
+
+
 # ----------------------------------------------------------------------------- Holt-Winters
 
 
@@ -307,6 +445,7 @@ def prophet_temp(train, horizon=HORIZON, country=None, weather=None) -> pd.DataF
 COMPOSITES = {
     "ensemble": ("prophet_tuned", "naive_avg3"),
     "ensemble_temp": ("prophet_temp", "naive_level"),
+    "ensemble_ridge": ("ridge_temp", "naive_recent"),
 }
 
 
@@ -330,17 +469,25 @@ def ensemble_temp(train, horizon=HORIZON, country=None, weather=None) -> pd.Data
     return run_model("ensemble_temp", train, horizon, country, weather)
 
 
+def ensemble_ridge(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
+    return run_model("ensemble_ridge", train, horizon, country, weather)
+
+
 MODELS = {
     "seasonal_naive": seasonal_naive,
     "naive_avg3": naive_avg3,
     "naive_daytype": naive_daytype,
     "naive_level": naive_level,
+    "naive_recent": naive_recent,
+    "naive_level_hourly": naive_level_hourly,
     "ets": ets,
     "prophet": prophet,
     "prophet_tuned": prophet_tuned,
     "prophet_temp": prophet_temp,
+    "ridge_temp": ridge_temp,
     "ensemble": ensemble,
     "ensemble_temp": ensemble_temp,
+    "ensemble_ridge": ensemble_ridge,
 }
 # Candidates of a normal run; plain Prophet and ETS never won a backtest and stay research-only.
 DEFAULT_MODELS = [
@@ -348,8 +495,12 @@ DEFAULT_MODELS = [
     "naive_avg3",
     "naive_daytype",
     "naive_level",
+    "naive_recent",
+    "naive_level_hourly",
     "prophet_tuned",
     "prophet_temp",
+    "ridge_temp",
     "ensemble",
     "ensemble_temp",
+    "ensemble_ridge",
 ]

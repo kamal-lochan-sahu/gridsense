@@ -39,6 +39,10 @@ LABELS = {
     "naive_avg3": "3-week seasonal average",
     "naive_daytype": "Holiday-aware 3-week average",
     "naive_level": "Level-adjusted weekly pattern",
+    "naive_recent": "Recent same-type days average",
+    "naive_level_hourly": "Hour-by-hour level-adjusted pattern",
+    "ridge_temp": "Calendar + temperature regression",
+    "ensemble_ridge": "Ensemble (regression + recent days)",
     "ensemble": "Ensemble (Prophet + 3-week average)",
     "ensemble_temp": "Ensemble (Prophet + temperature, level-adjusted)",
     "prophet_tuned": "Prophet (weekday/off-day curves)",
@@ -46,7 +50,7 @@ LABELS = {
     "prophet": "Prophet",
     "ets": "Holt-Winters (ETS)",
 }
-TEMPERATURE_MODELS = {"prophet_temp", "ensemble_temp"}
+TEMPERATURE_MODELS = {"prophet_temp", "ensemble_temp", "ridge_temp", "ensemble_ridge"}
 
 
 def utc_now() -> datetime:

@@ -39,27 +39,46 @@ def _number(value):
     return None if pd.isna(value) else round(float(value), 1)
 
 
-def build_track_record(series, champion, country, weather=None, tso=None, n_days: int = TRACK_DAYS):
-    """Dict for forecast.json, or None when not enough days could be evaluated."""
+def day_ahead_frame(series, names, country, weather=None, n_days: int = TRACK_DAYS) -> pd.DataFrame:
+    """Walk-forward day-ahead forecasts of several models next to the realised load.
+
+    One row per hour (UTC) of the last ``n_days`` complete days; columns ``actual`` and one per
+    model that could run. For each day D the models see only data up to ORIGIN_HOUR_UTC - 1 hours
+    on the day before. Forecasts that could not be produced are NaN.
+    """
     horizon = (24 - ORIGIN_HOUR_UTC) + 24
-    memo, parts = {}, []
+    memo, forecasts, actuals = {}, {name: [] for name in names}, []
     for day in target_days(series, n_days):
         origin = day - pd.Timedelta(hours=24 - ORIGIN_HOUR_UTC)
-        try:
-            ours = predict_origin(series, champion, origin, country, horizon, weather, memo)
-            naive = predict_origin(series, "seasonal_naive", origin, country, horizon, None, memo)
-        except Exception:  # a day that cannot be evaluated is skipped, not fatal
-            continue
-        if ours is None or naive is None:
-            continue
-        ours, naive = ours.set_index("ds").loc[day : day + 23 * HOUR], naive.set_index("ds")["yhat"]
-        parts.append(
-            pd.DataFrame({"actual": ours["actual"], "gridsense": ours["yhat"], "naive": naive.reindex(ours.index)})
-        )
-    if not parts:
-        return None
+        actual_added = False
+        for name in names:
+            try:
+                pred = predict_origin(series, name, origin, country, horizon, weather, memo)
+            except Exception:  # a model that cannot run on a day is skipped, not fatal
+                continue
+            if pred is None:
+                continue
+            window = pred.set_index("ds").loc[day : day + 23 * HOUR]
+            forecasts[name].append(window["yhat"])
+            if not actual_added:
+                actuals.append(window["actual"])
+                actual_added = True
+    if not actuals:
+        return pd.DataFrame(columns=["actual"])
+    frame = pd.DataFrame({"actual": pd.concat(actuals)})
+    for name in names:
+        if forecasts[name]:
+            frame[name] = pd.concat(forecasts[name]).reindex(frame.index)
+    return frame
 
-    frame = pd.concat(parts)
+
+def build_track_record(series, champion, country, weather=None, tso=None, n_days: int = TRACK_DAYS):
+    """Dict for forecast.json, or None when not enough days could be evaluated."""
+    names = list(dict.fromkeys([champion, "seasonal_naive"]))
+    raw = day_ahead_frame(series, names, country, weather, n_days)
+    if raw.empty or champion not in raw or "seasonal_naive" not in raw:
+        return None
+    frame = pd.DataFrame({"actual": raw["actual"], "gridsense": raw[champion], "naive": raw["seasonal_naive"]})
     frame["tso"] = tso.reindex(frame.index) if tso is not None else np.nan
     sources = [s for s in ALL_SOURCES if frame[s].notna().any()]
     frame = frame.dropna(subset=["actual", *sources])  # the same hours for every source
