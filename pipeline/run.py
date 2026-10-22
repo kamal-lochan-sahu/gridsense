@@ -43,6 +43,10 @@ LABELS = {
     "naive_level_hourly": "Hour-by-hour level-adjusted pattern",
     "ridge_temp": "Calendar + temperature regression",
     "ensemble_ridge": "Ensemble (regression + recent days)",
+    "naive_level_adj": "Level-adjusted pattern, corrected by its last-day error",
+    "ridge_temp_adj": "Calendar + temperature regression, corrected by its last-day error",
+    "prophet_temp_adj": "Prophet + temperature, corrected by its last-day error",
+    "ensemble_temp_adj": "Ensemble (Prophet + temperature), corrected by its last-day error",
     "ensemble": "Ensemble (Prophet + 3-week average)",
     "ensemble_temp": "Ensemble (Prophet + temperature, level-adjusted)",
     "prophet_tuned": "Prophet (weekday/off-day curves)",
@@ -50,7 +54,15 @@ LABELS = {
     "prophet": "Prophet",
     "ets": "Holt-Winters (ETS)",
 }
-TEMPERATURE_MODELS = {"prophet_temp", "ensemble_temp", "ridge_temp", "ensemble_ridge"}
+TEMPERATURE_MODELS = {
+    "prophet_temp",
+    "ensemble_temp",
+    "ridge_temp",
+    "ensemble_ridge",
+    "ridge_temp_adj",
+    "prophet_temp_adj",
+    "ensemble_temp_adj",
+}
 
 
 def utc_now() -> datetime:

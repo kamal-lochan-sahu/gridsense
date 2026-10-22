@@ -7,7 +7,7 @@ mostly noise, so a complicated model has to win clearly to be chosen.
 import numpy as np
 import pandas as pd
 
-from pipeline.models import COMPOSITES, HORIZON, MODELS
+from pipeline.models import ADJUST_HOURS, ADJUSTED, COMPOSITES, HORIZON, MODELS, adjustment_factor
 
 # Simplest first: on near-ties the simpler model is preferred (see select_champion).
 SIMPLICITY = [
@@ -15,14 +15,18 @@ SIMPLICITY = [
     "naive_avg3",
     "naive_daytype",
     "naive_level",
+    "naive_level_adj",
     "naive_recent",
     "naive_level_hourly",
     "ensemble",
     "ensemble_temp",
+    "ensemble_temp_adj",
     "ridge_temp",
+    "ridge_temp_adj",
     "ensemble_ridge",
     "prophet_tuned",
     "prophet_temp",
+    "prophet_temp_adj",
     "prophet",
     "ets",
 ]
@@ -53,7 +57,24 @@ def predict_origin(series, model_name, origin, country, horizon: int = HORIZON, 
         memo[key] = None
         return None
 
-    if model_name in COMPOSITES:
+    if model_name in ADJUSTED:
+        base = ADJUSTED[model_name]
+        now = predict_origin(series, base, origin, country, horizon, weather, memo)
+        if now is None:
+            memo[key] = None
+            return None
+        # The base model's forecast from one day earlier, restricted to hours that are known at ``origin``.
+        before_origin = origin - ADJUST_HOURS * HOUR
+        before = predict_origin(series, base, before_origin, country, horizon, weather, memo)
+        factor = 1.0
+        if before is not None:
+            known = before[(before["ds"] >= before_origin) & (before["ds"] < origin)]
+            factor = adjustment_factor(known["actual"], known["yhat"])
+        pred = now.copy()
+        pred["yhat"] = now["yhat"].to_numpy() * factor
+        pred["yhat_lower"] = np.nan
+        pred["yhat_upper"] = np.nan
+    elif model_name in COMPOSITES:
         parts = [
             predict_origin(series, part, origin, country, horizon, weather, memo)
             for part in COMPOSITES[model_name]

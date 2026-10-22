@@ -454,10 +454,44 @@ def average_frames(frames) -> pd.DataFrame:
     return _frame(frames[0].index, yhat)
 
 
+# Error-corrected variants: the base model's forecast is scaled by how wrong the same model was
+# over the last 24 hours that are already known (damped, clipped). It follows a level that moved
+# since yesterday, which is what leaves France and Poland biased low in autumn.
+ADJUSTED = {
+    "naive_level_adj": "naive_level",
+    "ridge_temp_adj": "ridge_temp",
+    "prophet_temp_adj": "prophet_temp",
+    "ensemble_temp_adj": "ensemble_temp",
+}
+ADJUST_HOURS = 24
+ADJUST_STRENGTH = 0.6  # share of the recent relative error that is carried over
+ADJUST_CLIP = (0.92, 1.08)  # never move a forecast by more than 8%
+MIN_ADJUST_HOURS = 12
+
+
+def adjustment_factor(actual, predicted) -> float:
+    """Multiplier for the next forecast from the model's own recent error (1.0 if unknown)."""
+    a, p = np.asarray(actual, dtype=float), np.asarray(predicted, dtype=float)
+    ok = np.isfinite(a) & np.isfinite(p) & (p > 0)
+    if ok.sum() < MIN_ADJUST_HOURS:
+        return 1.0
+    ratio = a[ok].sum() / p[ok].sum()
+    return float(np.clip(1 + ADJUST_STRENGTH * (ratio - 1), *ADJUST_CLIP))
+
+
 def run_model(name, train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
-    """Run any model by name, composites included."""
+    """Run any model by name, composites and error-corrected variants included."""
     if name in COMPOSITES:
         return average_frames([run_model(c, train, horizon, country, weather) for c in COMPOSITES[name]])
+    if name in ADJUSTED:
+        base = ADJUSTED[name]
+        now = run_model(base, train, horizon, country, weather)
+        past = train.iloc[:-ADJUST_HOURS]
+        if len(past) < 24 * 14:
+            return now
+        before = run_model(base, past, ADJUST_HOURS, country, weather)  # covers exactly the last 24 known hours
+        factor = adjustment_factor(train.reindex(before.index).to_numpy(), before["yhat"].to_numpy())
+        return _frame(now.index, now["yhat"].to_numpy() * factor)
     return MODELS[name](train, horizon, country, weather)
 
 
@@ -471,6 +505,22 @@ def ensemble_temp(train, horizon=HORIZON, country=None, weather=None) -> pd.Data
 
 def ensemble_ridge(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
     return run_model("ensemble_ridge", train, horizon, country, weather)
+
+
+def naive_level_adj(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
+    return run_model("naive_level_adj", train, horizon, country, weather)
+
+
+def ridge_temp_adj(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
+    return run_model("ridge_temp_adj", train, horizon, country, weather)
+
+
+def prophet_temp_adj(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
+    return run_model("prophet_temp_adj", train, horizon, country, weather)
+
+
+def ensemble_temp_adj(train, horizon=HORIZON, country=None, weather=None) -> pd.DataFrame:
+    return run_model("ensemble_temp_adj", train, horizon, country, weather)
 
 
 MODELS = {
@@ -488,6 +538,10 @@ MODELS = {
     "ensemble": ensemble,
     "ensemble_temp": ensemble_temp,
     "ensemble_ridge": ensemble_ridge,
+    "naive_level_adj": naive_level_adj,
+    "ridge_temp_adj": ridge_temp_adj,
+    "prophet_temp_adj": prophet_temp_adj,
+    "ensemble_temp_adj": ensemble_temp_adj,
 }
 # Candidates of a normal run; plain Prophet and ETS never won a backtest and stay research-only.
 DEFAULT_MODELS = [
@@ -503,4 +557,8 @@ DEFAULT_MODELS = [
     "ensemble",
     "ensemble_temp",
     "ensemble_ridge",
+    "naive_level_adj",
+    "ridge_temp_adj",
+    "prophet_temp_adj",
+    "ensemble_temp_adj",
 ]
