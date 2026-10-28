@@ -27,14 +27,16 @@ ENTSO-E publishes load data with a delay of roughly one hour, so the newest poin
 
 ## How good is the forecast?
 
-Honestly: better than a simple baseline everywhere, better than the grid operator in Germany, and clearly behind the operators in France, Spain and Poland. Snapshot, average error over the 7 days to 21 October 2026 (lower is better):
+Honestly: ahead of the grid operator in Germany, clearly behind the operators in France, Spain and Poland, and usually (not always) better than simply copying last week. Snapshot, average error over the 7 days to 26 October 2026 (lower is better):
 
 | Country | GridSense | TSO day-ahead | Same hour last week |
 | ------- | --------- | ------------- | ------------------- |
-| Germany | **2.16 %** | 2.54 % | 2.96 % |
-| France  | 3.50 %    | **1.19 %** | 4.29 % |
-| Spain   | 2.63 %    | **0.90 %** | 5.59 % |
-| Poland  | 2.35 %    | **1.74 %** | 4.69 % |
+| Germany | **2.53 %** | 3.36 % | 2.91 % |
+| France  | 3.05 %    | **1.68 %** | 9.69 % |
+| Spain   | 2.48 %    | **1.08 %** | 2.89 % |
+| Poland  | 2.47 %    | **1.61 %** | 2.29 % |
+
+The last column swings with the weather and the calendar: in France it was 8-14 % off on the days after a temperature change and in Spain 15 % off on 19 October, a week after the 12 October holiday, while GridSense stayed around 2-3 %. In Poland, over the last five days of this snapshot, the plain baseline was slightly better than GridSense.
 
 The dashboard always shows the current numbers. Read them with these caveats (details in [docs/FORECASTING.md](docs/FORECASTING.md)):
 

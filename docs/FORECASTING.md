@@ -78,6 +78,7 @@ All numbers are average absolute percentage errors on real ENTSO-E data, autumn 
 - **Error correction** removed most of the low bias in France and Poland (France: 3.7 % to 2.5 %) but added a little noise in Germany, where the level was already stable. Hence it is a candidate, not a default.
 - Averaging the last few same-type days (`naive_recent`) did not help overall.
 - Against the TSOs: GridSense is ahead in Germany over two weeks, and behind in France (about 1.3 points), Spain (about 1.7) and Poland (about 0.7). The gap is every day, not a few bad days; the TSOs' own weather forecasts and richer data are the likely reason.
+- Live check, week to 26 October: copying last week was 8-14 % off in France on the days after a temperature change and 15 % off in Spain on 19 October (one week after the 12 October holiday), while GridSense stayed at 2-3 %. That is the weather and holiday handling working. In Poland the plain baseline was 0.2-0.6 points better than GridSense on the last five days: once the load is stable, a level- or error-corrected model only adds noise, which is why the pipeline compares candidates again on every run.
 
 ## 8. Known limitations
 
