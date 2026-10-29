@@ -35,7 +35,7 @@ All phases up to the track record are on main and verified live.
 - Model choice is automatic per country: the simplest model within 3 % of the best backtest MAPE. Prophet stays in the pool (Kamal wants it) and is chosen when it earns it.
 - Temperature comes from Open-Meteo: ERA5 archive for the long history, Forecast API for the last 14 days and the next 3 (the Forecast API alone returned ~50 days of nulls).
 - README and docs are written once, at the end of the project.
-- Git history: recommendation is to keep it (it is clean); a 3 MB icon blob and two debug commits remain. Final call undecided.
+- Git history: kept as it is (the repository is under 1 MB in total). The unused prophet_model.pkl was removed.
 
 ## Key findings (real ENTSO-E data, autumn 2026)
 - Default Prophet and ETS lost to copying last week; a level-adjusted naive model won in three countries because the load drifts in autumn.
@@ -45,9 +45,9 @@ All phases up to the track record are on main and verified live.
 - 2026 national holidays used: Spain 12 Oct and 8 Dec; France and Poland 11 Nov; Germany 3 Oct (Saturday), 25 and 26 Dec. 1 Nov 2026 is a Sunday.
 
 ## Open items
-- Confirm no new failed Vercel deployments (the old `data` branch no longer exists on GitHub).
+- Vercel: no failed deployments since the release-asset switch on 2026-10-08 (checked 2026-10-27, Render live on the latest commit).
 - Look at the Track record card on the live site once (it was never viewed in a browser by Claude).
-- Undecided: rewrite git history? remove the unused backend/models/prophet_model.pkl?
+- Decided 2026-10-27: keep the git history as it is (the whole repository is under 1 MB; the old 3 MB icon blob is no problem) and remove the unused backend/models/prophet_model.pkl.
 - Ideas, not started: more countries (Italy, Netherlands, Belgium, UK), alerts, archived weather forecasts for honest temperature tests, regional holidays and bridge days.
 
 ## Gotchas
