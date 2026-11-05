@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from core import service
+from core import log_redaction, service
 from core.config import CITY_COORDS, COUNTRY_CODES
 from data.fetcher import UpstreamError
 
@@ -15,6 +15,7 @@ logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
+log_redaction.install()
 
 app = FastAPI(
     title="GridSense API",

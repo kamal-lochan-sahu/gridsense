@@ -27,6 +27,7 @@ export interface WeatherData {
   temperature: number[];
   windspeed: number[];
   cloudcover: number[];
+  source?: string;
 }
 
 export interface ForecastPoint {

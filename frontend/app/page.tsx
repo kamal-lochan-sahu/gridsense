@@ -565,6 +565,7 @@ export default function Home() {
         {weatherData.length === 0 ? (
           <p className="text-gray-400 text-sm">Weather data is not available right now.</p>
         ) : (
+          <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {weatherData.map((city) => {
               const i =
@@ -593,6 +594,10 @@ export default function Home() {
               );
             })}
           </div>
+          {weatherData.some((city) => city.source === "met-norway") && (
+            <p className="text-gray-500 text-xs mt-3">Weather data from MET Norway.</p>
+          )}
+          </>
         )}
       </div>
     </main>

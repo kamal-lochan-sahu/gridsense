@@ -6,6 +6,7 @@ Error messages never contain the ENTSO-E security token.
 import logging
 import os
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import requests
 from dotenv import load_dotenv
@@ -17,6 +18,12 @@ log = logging.getLogger(__name__)
 
 ENTSOE_BASE_URL = "https://web-api.tp.entsoe.eu/api"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
+# Fallback weather source (free, no key). Its terms ask for an identifying User-Agent and a credit.
+MET_URL = "https://api.met.no/weatherapi/locationforecast/2.0/compact"
+MET_USER_AGENT = os.getenv(
+    "MET_USER_AGENT", "GridSense/1.1 (+https://github.com/kamal-lochan-sahu/gridsense)"
+)
+WEATHER_TIMEZONE = "Europe/Berlin"
 REQUEST_TIMEOUT = (5, 25)  # (connect, read) seconds
 
 
@@ -31,6 +38,7 @@ def _build_session() -> requests.Session:
         status_forcelist=(429, 500, 502, 503, 504),
         allowed_methods=("GET",),
         respect_retry_after_header=False,  # keep worst-case latency bounded
+        raise_on_status=False,  # hand back the last response so the real HTTP status is reported
     )
     session = requests.Session()
     session.mount("https://", HTTPAdapter(max_retries=retry, pool_maxsize=10))
@@ -68,14 +76,14 @@ def fetch_energy_xml(country: str, country_code: str) -> str:
     return response.text
 
 
-def fetch_weather(city: str, latitude: float, longitude: float) -> dict:
+def _fetch_open_meteo(city: str, latitude: float, longitude: float) -> dict:
     """Hourly temperature, wind speed and cloud cover for the next two days."""
     params = {
         "latitude": latitude,
         "longitude": longitude,
         "hourly": "temperature_2m,windspeed_10m,cloudcover",
         "forecast_days": 2,
-        "timezone": "Europe/Berlin",
+        "timezone": WEATHER_TIMEZONE,
     }
     try:
         response = _session.get(WEATHER_URL, params=params, timeout=REQUEST_TIMEOUT)
@@ -96,12 +104,86 @@ def fetch_weather(city: str, latitude: float, longitude: float) -> dict:
 
     return {
         "city": city,
-        "timezone": data.get("timezone", "Europe/Berlin"),
+        "timezone": data.get("timezone", WEATHER_TIMEZONE),
         "hourly_time": times,
         "temperature": hourly.get("temperature_2m", []),
         "windspeed": hourly.get("windspeed_10m", []),
         "cloudcover": hourly.get("cloudcover", []),
     }
+
+
+def _fetch_met_norway(city: str, latitude: float, longitude: float) -> dict:
+    """Fallback: MET Norway forecast converted to the Open-Meteo shape the dashboard expects.
+
+    Wind comes in m/s (converted to km/h) and times in UTC (converted to local wall-clock
+    strings). Only the leading hourly part of the series is used (up to 48 hours).
+    """
+    params = {"lat": round(latitude, 4), "lon": round(longitude, 4)}
+    try:
+        response = _session.get(
+            MET_URL, params=params, headers={"User-Agent": MET_USER_AGENT}, timeout=REQUEST_TIMEOUT
+        )
+        data = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        log.warning("MET Norway request failed for %s: %s", city, type(exc).__name__)
+        raise UpstreamError(f"MET Norway request failed for {city}") from None
+
+    if response.status_code != 200 or not isinstance(data, dict):
+        log.warning("MET Norway error for %s: HTTP %s", city, response.status_code)
+        raise UpstreamError(f"MET Norway error for {city}: HTTP {response.status_code}")
+
+    zone = ZoneInfo(WEATHER_TIMEZONE)
+    times: list = []
+    temperature: list = []
+    windspeed: list = []
+    cloudcover: list = []
+    previous = None
+    for entry in (data.get("properties") or {}).get("timeseries") or []:
+        try:
+            moment = datetime.fromisoformat(entry["time"].replace("Z", "+00:00"))
+            details = entry["data"]["instant"]["details"]
+            temp = round(float(details["air_temperature"]), 1)
+            wind = round(float(details["wind_speed"]) * 3.6, 1)
+            cloud = round(float(details["cloud_area_fraction"]))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            break
+        if previous is not None and moment - previous != timedelta(hours=1):
+            break  # the series continues in 3 h and 6 h steps, the dashboard needs hourly values
+        previous = moment
+        times.append(moment.astimezone(zone).strftime("%Y-%m-%dT%H:%M"))
+        temperature.append(temp)
+        windspeed.append(wind)
+        cloudcover.append(cloud)
+        if len(times) == 48:
+            break
+
+    if not times:
+        raise UpstreamError(f"MET Norway returned no hourly data for {city}")
+
+    return {
+        "city": city,
+        "timezone": WEATHER_TIMEZONE,
+        "hourly_time": times,
+        "temperature": temperature,
+        "windspeed": windspeed,
+        "cloudcover": cloudcover,
+    }
+
+
+def fetch_weather(city: str, latitude: float, longitude: float) -> dict:
+    """Open-Meteo first, MET Norway when Open-Meteo fails; ``source`` says which one answered."""
+    try:
+        data = _fetch_open_meteo(city, latitude, longitude)
+        data["source"] = "open-meteo"
+        return data
+    except UpstreamError as primary:
+        log.warning("Open-Meteo unavailable for %s (%s); trying MET Norway", city, primary)
+        try:
+            data = _fetch_met_norway(city, latitude, longitude)
+        except UpstreamError as fallback:
+            raise UpstreamError(f"{primary}; {fallback}") from None
+        data["source"] = "met-norway"
+        return data
 
 
 def fetch_forecast_file(url: str) -> dict:
