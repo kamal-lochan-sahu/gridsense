@@ -27,16 +27,20 @@ ENTSO-E publishes load data with a delay of roughly one hour, so the newest poin
 
 ## How good is the forecast?
 
-Honestly: ahead of the grid operator in Germany, clearly behind the operators in France, Spain and Poland, and usually (not always) better than simply copying last week. Snapshot, average error over the 7 days to 26 October 2026 (lower is better):
+Honestly: about on par with the grid operator in Germany (the lead changes from week to week), clearly behind the operators in France, Spain and Poland, and usually (not always) better than simply copying last week.
+
+<!-- snapshot:start -->
+Snapshot, average error over the 7 days to 4 November 2026 (lower is better, generated from the published `forecast.json`):
 
 | Country | GridSense | TSO day-ahead | Same hour last week |
 | ------- | --------- | ------------- | ------------------- |
-| Germany | **2.53 %** | 3.36 % | 2.91 % |
-| France  | 3.05 %    | **1.68 %** | 9.69 % |
-| Spain   | 2.48 %    | **1.08 %** | 2.89 % |
-| Poland  | 2.47 %    | **1.61 %** | 2.29 % |
+| Germany | **2.92 %** | 2.97 % | 3.71 % |
+| France | 3.63 % | **1.51 %** | 7.44 % |
+| Spain | 2.87 % | **1.37 %** | 3.81 % |
+| Poland | 2.86 % | **1.99 %** | 2.56 % |
+<!-- snapshot:end -->
 
-The last column swings with the weather and the calendar: in France it was 8-14 % off on the days after a temperature change and in Spain 15 % off on 19 October, a week after the 12 October holiday, while GridSense stayed around 2-3 %. In Poland, over the last five days of this snapshot, the plain baseline was slightly better than GridSense.
+The last column swings with the weather and the calendar: in the week to 26 October 2026 it was 8-14 % off in France on the days after a temperature change and 15 % off in Spain on 19 October, a week after the 12 October holiday, while GridSense stayed around 2-3 %. The table above is generated from the published `forecast.json` with `python -m pipeline.readme_snapshot`, so its numbers move with the weeks.
 
 The dashboard always shows the current numbers. Read them with these caveats (details in [docs/FORECASTING.md](docs/FORECASTING.md)):
 
@@ -119,6 +123,7 @@ gridsense/
 │   ├── models.py          # all candidate models
 │   ├── champion.py        # rolling backtest and model selection
 │   ├── trackrecord.py     # walk-forward comparison with the TSO
+│   ├── readme_snapshot.py # regenerates the README accuracy table from forecast.json
 │   ├── anomaly.py         # forecast-residual anomaly detection
 │   ├── history.py, weather.py, daytype.py   # data loading, temperature, holidays
 │   ├── compare.py, backtest.py, diagnose.py # research tools
