@@ -13,6 +13,7 @@ import {
 } from "recharts";
 import { getJson } from "@/lib/api";
 import { formatDateTime, formatTime } from "@/lib/format";
+import { peakTimeLabel, summarizeCountry, type CountryOverview } from "@/lib/overview";
 import { currentHourIndex } from "@/lib/weather";
 import type {
   AnomalyData,
@@ -25,6 +26,7 @@ import type {
 
 const REFRESH_INTERVAL = 5 * 60 * 1000;
 const EXPECTED_COUNTRIES = ["Germany", "France", "Spain", "Poland"];
+const OVERVIEW_COUNTRIES = EXPECTED_COUNTRIES.map((c) => c.toLowerCase());
 
 const TOOLTIP_STYLE = {
   backgroundColor: "#1F2937",
@@ -184,6 +186,7 @@ export default function Home() {
   const [forecastError, setForecastError] = useState<string | null>(null);
   const [trackRecord, setTrackRecord] = useState<TrackRecordData | null>(null);
   const [anomalyData, setAnomalyData] = useState<AnomalyData | null>(null);
+  const [overview, setOverview] = useState<Record<string, CountryOverview>>({});
   const [selectedCountry, setSelectedCountry] = useState("germany");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -278,6 +281,28 @@ export default function Home() {
       });
     return () => controller.abort();
   }, [selectedCountry, refreshCount]);
+
+  // Anomaly count and forecast peak for every country, so the cards show alerts without a click.
+  useEffect(() => {
+    if (refreshCount === 0) return;
+    const controller = new AbortController();
+    void Promise.all(
+      OVERVIEW_COUNTRIES.map(async (country) => {
+        const [anomalies, forecast] = await Promise.allSettled([
+          getJson<AnomalyData>(`/anomaly/${country}`, controller.signal),
+          getJson<ForecastData>(`/forecast/${country}`, controller.signal),
+        ]);
+        const summary = summarizeCountry(
+          anomalies.status === "fulfilled" ? anomalies.value : null,
+          forecast.status === "fulfilled" ? forecast.value : null
+        );
+        return [country, summary] as const;
+      })
+    ).then((entries) => {
+      if (!controller.signal.aborted) setOverview(Object.fromEntries(entries));
+    });
+    return () => controller.abort();
+  }, [refreshCount]);
 
   if (loading) return <SplashScreen />;
 
@@ -391,6 +416,7 @@ export default function Home() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {energyData.map((country) => {
           const selected = selectedCountry === country.country.toLowerCase();
+          const summary = overview[country.country.toLowerCase()];
           return (
             <button
               type="button"
@@ -410,6 +436,23 @@ export default function Home() {
               <p className="text-green-400 text-xs mt-1">
                 MW{country.latest_time ? ` at ${formatTime(country.latest_time)}` : ""}
               </p>
+              {summary && summary.anomalies !== null && (
+                <p
+                  className={`text-xs mt-2 ${
+                    summary.anomalies > 0 ? "text-red-300 font-semibold" : "text-gray-500"
+                  }`}
+                >
+                  {summary.anomalies > 0
+                    ? `⚠ ${summary.anomalies} ${summary.anomalies === 1 ? "anomaly" : "anomalies"}`
+                    : "No anomalies"}
+                </p>
+              )}
+              {summary?.peak && (
+                <p className="text-gray-400 text-xs mt-1">
+                  Forecast peak {Math.round(summary.peak.mw).toLocaleString()} MW at{" "}
+                  {peakTimeLabel(summary.peak.time)}
+                </p>
+              )}
             </button>
           );
         })}
