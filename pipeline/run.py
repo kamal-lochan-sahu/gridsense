@@ -118,7 +118,7 @@ def build_country_entry(country: str, series: pd.Series, candidates, n_origins: 
             "upper_pct": round(float(q_hi) * 100, 2),
         },
         "predictions": predictions,
-        "anomalies": robust_anomalies(residuals),
+        "anomalies": robust_anomalies(residuals, suspect=series.attrs.get("suspect_hours")),
         "track_record": track_record,
     }
 

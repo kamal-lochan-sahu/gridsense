@@ -19,6 +19,7 @@ load_dotenv(ROOT / "backend" / ".env")
 
 from backend.core.config import COUNTRY_CODES  # noqa: E402
 from backend.data.parser import parse_energy_xml  # noqa: E402
+from pipeline.anomaly import STEP_LIMIT  # noqa: E402
 
 ENTSOE_BASE_URL = "https://web-api.tp.entsoe.eu/api"
 CHUNK_DAYS = 30  # keep each request small; ENTSO-E limits very long ranges
@@ -53,18 +54,44 @@ def _fetch_chunk(country_code: str, start: datetime, end: datetime, token: str, 
     raise HistoryError(f"ENTSO-E request failed ({last_error})")
 
 
+def suspect_hours(quarter_hours: pd.Series, limit: float = STEP_LIMIT) -> pd.DatetimeIndex:
+    """UTC hours touched by an implausible jump between two consecutive 15-minute values.
+
+    Both sides of a jump count (the hour of the earlier and of the later value). Series that are
+    not in 15-minute steps are not checked: their steps are naturally larger.
+    """
+    empty = pd.DatetimeIndex([], tz="UTC")
+    if len(quarter_hours) < 2:
+        return empty
+    if quarter_hours.index.to_series().diff().median() != pd.Timedelta(minutes=15):
+        return empty
+    grid = quarter_hours.asfreq("15min")
+    previous = grid.shift(1)
+    step = (grid - previous).abs() / ((grid + previous) / 2)
+    jumps = step.index[(step > limit).to_numpy()]
+    if len(jumps) == 0:
+        return empty
+    both_sides = jumps.floor("h").append((jumps - pd.Timedelta(minutes=15)).floor("h"))
+    return both_sides.unique().sort_values()
+
+
 def to_hourly(series_points: list) -> pd.Series:
-    """Convert parser output ([{time, load_mw}, ...]) to a clean hourly UTC series."""
+    """Convert parser output ([{time, load_mw}, ...]) to a clean hourly UTC series.
+
+    The hours with implausible 15-minute jumps are kept in ``series.attrs["suspect_hours"]``.
+    """
     df = pd.DataFrame(series_points)
     if df.empty:
         raise HistoryError("no points to convert")
     df["time"] = pd.to_datetime(df["time"], utc=True)
     s = df.drop_duplicates("time").set_index("time")["load_mw"].astype(float).sort_index()
     s = s.replace(0.0, np.nan)  # a zero national load is a data glitch, not a real value
+    suspect = suspect_hours(s)
     hourly = s.resample("1h").mean()
     hourly = hourly.interpolate(limit=3)  # fill short gaps only
     hourly = hourly.dropna()
     hourly.index.name = "ds"
+    hourly.attrs["suspect_hours"] = suspect
     return hourly
 
 

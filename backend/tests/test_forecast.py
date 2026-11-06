@@ -154,6 +154,57 @@ def test_anomalies_come_from_the_pipeline_without_touching_entsoe(monkeypatch, p
     assert body["window_level_pct"] == 5.1
 
 
+def test_anomalies_report_the_data_quality_and_the_held_back_deviations(pipeline):
+    held = {
+        "time": "2026-10-02T12:00Z",
+        "load_mw": 56098.0,
+        "expected_mw": 67531.0,
+        "deviation_pct": -16.93,
+        "score": -8.05,
+        "deviation": "LOW",
+    }
+    pipeline["data"] = payload(
+        {
+            "germany": entry(
+                anomalies={
+                    "status": "success",
+                    "method": "forecast-residual robust z-score (local level removed, 95th-percentile scale)",
+                    "threshold": 3.5,
+                    "window_hours": 24,
+                    "typical_error_pct": 1.84,
+                    "window_level_pct": -1.9,
+                    "total_anomalies": 0,
+                    "items": [],
+                    "data_quality": {
+                        "step_limit_pct": 8.0,
+                        "suspect_hours": ["2026-10-02T11:00Z", "2026-10-02T12:00Z"],
+                        "suppressed_items": [held],
+                    },
+                }
+            )
+        }
+    )
+    body = client.get("/anomaly/germany").json()
+    assert body["total_anomalies"] == 0 and body["anomalies"] == []
+    quality = body["data_quality"]
+    assert quality["step_limit_pct"] == 8.0
+    assert quality["suspect_hours"] == ["2026-10-02T11:00Z", "2026-10-02T12:00Z"]
+    assert quality["suppressed_anomalies"] == [
+        {
+            "time": "2026-10-02T12:00Z",
+            "load_mw": 56098.0,
+            "expected_mw": 67531.0,
+            "deviation_pct": -16.93,
+            "z_score": -8.05,
+            "deviation": "LOW",
+        }
+    ]
+
+
+def test_older_pipeline_files_without_quality_information_still_work(pipeline):
+    assert client.get("/anomaly/germany").json()["data_quality"] is None
+
+
 @pytest.mark.parametrize(
     "data",
     [

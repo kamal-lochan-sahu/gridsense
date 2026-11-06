@@ -60,6 +60,12 @@ export interface AnomalyPoint {
   deviation: "HIGH" | "LOW";
 }
 
+export interface DataQuality {
+  step_limit_pct: number; // a jump bigger than this within 15 minutes marks the hour as suspect
+  suspect_hours: string[]; // ISO-8601 UTC hours of the last 24 with such jumps
+  suppressed_anomalies: AnomalyPoint[]; // deviations in suspect hours, not counted as anomalies
+}
+
 export interface AnomalyData {
   status: string;
   country: string;
@@ -69,7 +75,9 @@ export interface AnomalyData {
   source?: "pipeline" | "live-zscore";
   method?: string;
   typical_error_pct?: number;
+  window_hours?: number;
   anomalies: AnomalyPoint[];
+  data_quality?: DataQuality | null;
 }
 
 export interface TrackRecordWindow {

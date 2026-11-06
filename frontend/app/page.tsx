@@ -412,6 +412,25 @@ export default function Home() {
         </div>
       )}
 
+      {/* Source data problem: the numbers jump in a way a real grid does not */}
+      {anomaly?.data_quality && anomaly.data_quality.suspect_hours.length > 0 && (
+        <div role="status" className="mb-6 p-4 bg-yellow-950 border border-yellow-600 rounded-xl">
+          <h3 className="text-yellow-400 font-semibold text-sm mb-1">
+            ⚠ Source data issue in the {anomaly.country} load
+          </h3>
+          <p className="text-yellow-200 text-xs">
+            In {anomaly.data_quality.suspect_hours.length} of the last {anomaly.window_hours ?? 24} hours
+            the published load jumps by more than {anomaly.data_quality.step_limit_pct}% within 15 minutes,
+            which a real grid does not do. Deviations from the forecast in those hours are not reported as
+            anomalies
+            {anomaly.data_quality.suppressed_anomalies.length > 0
+              ? ` (${anomaly.data_quality.suppressed_anomalies.length} held back)`
+              : ""}
+            .
+          </p>
+        </div>
+      )}
+
       {/* Energy Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {energyData.map((country) => {
@@ -444,8 +463,13 @@ export default function Home() {
                 >
                   {summary.anomalies > 0
                     ? `⚠ ${summary.anomalies} ${summary.anomalies === 1 ? "anomaly" : "anomalies"}`
-                    : "No anomalies"}
+                    : summary.dataIssue
+                      ? "No anomalies reported"
+                      : "No anomalies"}
                 </p>
+              )}
+              {summary?.dataIssue && (
+                <p className="text-yellow-300 text-xs mt-1">⚠ Source data issue</p>
               )}
               {summary?.peak && (
                 <p className="text-gray-400 text-xs mt-1">

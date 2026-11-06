@@ -144,6 +144,17 @@ def get_track_record(country: str):
     }
 
 
+def _anomaly_item(item: dict) -> dict:
+    return {
+        "time": item["time"],
+        "load_mw": item["load_mw"],
+        "expected_mw": item["expected_mw"],
+        "deviation_pct": item["deviation_pct"],
+        "z_score": item["score"],
+        "deviation": item["deviation"],
+    }
+
+
 def _pipeline_anomalies(country: str):
     """Residual-based anomalies from the pipeline, or None if missing, too old or unusable."""
     try:
@@ -154,6 +165,7 @@ def _pipeline_anomalies(country: str):
         found = entry["anomalies"]
         if found.get("status") != "success" or _age_hours(data["generated_at"]) > PIPELINE_MAX_AGE_HOURS:
             return None
+        quality = found.get("data_quality")
         return {
             "status": "success",
             "source": "pipeline",
@@ -164,17 +176,16 @@ def _pipeline_anomalies(country: str):
             "typical_error_pct": found.get("typical_error_pct"),
             "window_level_pct": found.get("window_level_pct"),
             "total_anomalies": found["total_anomalies"],
-            "anomalies": [
+            "anomalies": [_anomaly_item(item) for item in found["items"]],
+            "data_quality": (
                 {
-                    "time": item["time"],
-                    "load_mw": item["load_mw"],
-                    "expected_mw": item["expected_mw"],
-                    "deviation_pct": item["deviation_pct"],
-                    "z_score": item["score"],
-                    "deviation": item["deviation"],
+                    "step_limit_pct": quality["step_limit_pct"],
+                    "suspect_hours": list(quality["suspect_hours"]),
+                    "suppressed_anomalies": [_anomaly_item(item) for item in quality["suppressed_items"]],
                 }
-                for item in found["items"]
-            ],
+                if quality
+                else None
+            ),
             "generated_at": data["generated_at"],
             "data_until": entry.get("data_until"),
             "stale": stale,
