@@ -17,7 +17,10 @@ Source-data glitches: ENTSO-E sometimes publishes quarter-hours that jump by mor
 previous one (Germany, 5 Nov 2026: 65.5 -> 52.8 GW within 15 minutes), which no real grid does.
 The hours touched by such a jump are *suspect*: they are left out of the level and of the scale
 of normal errors, and a deviation found in them is not reported as an anomaly but listed under
-``data_quality`` so the dashboard can say that the source data is inconsistent instead.
+``data_quality`` so the dashboard can say that the source data is inconsistent instead. A glitch
+block often goes on after its last jump without a new one (6 Nov 2026: a plateau about 10 GW too
+low from 11:15 to 13:45 with a jump only at 11:00 and 12:00), so the hour on each side of a suspect
+hour is held back as well.
 """
 import numpy as np
 import pandas as pd
@@ -29,6 +32,7 @@ MIN_BASELINE_HOURS = 48
 SCALE_FLOOR = 0.003  # relative; stops a very quiet baseline from making everything an anomaly
 LEVEL_WINDOW = 25  # hours; centred rolling median that defines the local level of the errors
 STEP_LIMIT = 0.08  # a national load does not move by more than 8% within one quarter-hour
+SUSPECT_MARGIN = pd.Timedelta(hours=1)  # hours next to a suspect hour are held back too
 
 
 def _item(ts, residuals, rel, score) -> dict:
@@ -58,7 +62,9 @@ def robust_anomalies(
         return {**base_info, "status": "insufficient_data", "total_anomalies": 0, "items": []}
 
     suspect_index = pd.DatetimeIndex(suspect if suspect is not None else [])
-    is_suspect = pd.Series(residuals.index.isin(suspect_index), index=residuals.index)
+    detected = pd.Series(residuals.index.isin(suspect_index), index=residuals.index)
+    held_index = suspect_index.union(suspect_index - SUSPECT_MARGIN).union(suspect_index + SUSPECT_MARGIN)
+    is_suspect = pd.Series(residuals.index.isin(held_index), index=residuals.index)
 
     rel = (residuals["actual"] - residuals["yhat"]) / residuals["yhat"]
     rel_clean = rel.where(~is_suspect)  # suspect hours do not shape the level or the scale
@@ -81,7 +87,7 @@ def robust_anomalies(
     if not in_window.notna().any():
         in_window = rel.iloc[-window_hours:]
     suspect_in_window = [
-        ts.strftime("%Y-%m-%dT%H:%MZ") for ts in is_suspect.index[-window_hours:][is_suspect.iloc[-window_hours:]]
+        ts.strftime("%Y-%m-%dT%H:%MZ") for ts in detected.index[-window_hours:][detected.iloc[-window_hours:]]
     ]
     return {
         **base_info,
@@ -93,7 +99,7 @@ def robust_anomalies(
         "items": items,
         "data_quality": {
             "step_limit_pct": round(STEP_LIMIT * 100, 1),
-            "suspect_hours": suspect_in_window,
+            "suspect_hours": suspect_in_window,  # the hours with a jump; their neighbours are held back too
             "suppressed_items": suppressed,
         },
     }

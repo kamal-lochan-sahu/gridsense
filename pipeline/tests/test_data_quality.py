@@ -91,3 +91,13 @@ def test_suspect_hours_in_the_past_do_not_inflate_the_normal_error():
 def test_no_quality_information_changes_nothing_and_reports_an_empty_quality_block():
     out = robust_anomalies(residual_frame())
     assert out["data_quality"]["suspect_hours"] == [] and out["data_quality"]["suppressed_items"] == []
+
+
+def test_the_hour_on_each_side_of_a_suspect_hour_is_held_back_too():
+    df = residual_frame()
+    df.iloc[-6:-3, df.columns.get_loc("actual")] *= 0.85  # three low hours, only the middle one has a jump
+    df.iloc[-1, df.columns.get_loc("actual")] *= 0.85  # one more low hour, 4 hours after the suspect hour
+    out = robust_anomalies(df, suspect=[df.index[-5]])
+    assert [i["time"] for i in out["items"]] == [stamp(df.index[-1])]
+    assert [i["time"] for i in out["data_quality"]["suppressed_items"]] == [stamp(t) for t in df.index[-6:-3]]
+    assert out["data_quality"]["suspect_hours"] == [stamp(df.index[-5])]  # only the hour with the jump is listed

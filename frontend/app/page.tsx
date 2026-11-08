@@ -421,8 +421,8 @@ export default function Home() {
           <p className="text-yellow-200 text-xs">
             In {anomaly.data_quality.suspect_hours.length} of the last {anomaly.window_hours ?? 24} hours
             the published load jumps by more than {anomaly.data_quality.step_limit_pct}% within 15 minutes,
-            which a real grid does not do. Deviations from the forecast in those hours are not reported as
-            anomalies
+            which a real grid does not do. Deviations from the forecast in those hours and in the hour on
+            each side are not reported as anomalies
             {anomaly.data_quality.suppressed_anomalies.length > 0
               ? ` (${anomaly.data_quality.suppressed_anomalies.length} held back)`
               : ""}
