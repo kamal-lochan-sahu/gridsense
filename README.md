@@ -30,14 +30,16 @@ ENTSO-E publishes load data with a delay of roughly one hour, so the newest poin
 Honestly: about on par with the grid operator in Germany (the lead changes from week to week), clearly behind the operators in France, Spain and Poland, and usually (not always) better than simply copying last week.
 
 <!-- snapshot:start -->
-Snapshot, average error over the 7 days to 4 November 2026 (lower is better, generated from the published `forecast.json`):
+Snapshot, average error over the 7 days to 9 November 2026 (lower is better, generated from the published `forecast.json`):
 
 | Country | GridSense | TSO day-ahead | Same hour last week |
 | ------- | --------- | ------------- | ------------------- |
-| Germany | **2.92 %** | 2.97 % | 3.71 % |
-| France | 3.63 % | **1.51 %** | 7.44 % |
-| Spain | 2.87 % | **1.37 %** | 3.81 % |
-| Poland | 2.86 % | **1.99 %** | 2.56 % |
+| Germany | **2.26 %** | 4.14 % | 6.01 % |
+| France | 3.34 % | **1.35 %** | 11.30 % |
+| Spain | 3.54 % | **1.37 %** | 5.19 % |
+| Poland | 2.49 % | **2.40 %** | 5.56 % |
+| Italy | 3.64 % | **1.81 %** | 5.65 % |
+| Belgium | **2.61 %** | 3.47 % | 4.97 % |
 <!-- snapshot:end -->
 
 The last column swings with the weather and the calendar: in the week to 26 October 2026 it was 8-14 % off in France on the days after a temperature change and 15 % off in Spain on 19 October, a week after the 12 October holiday, while GridSense stayed around 2-3 %. The table above is generated from the published `forecast.json` with `python -m pipeline.readme_snapshot`, so its numbers move with the weeks.
