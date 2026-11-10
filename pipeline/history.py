@@ -19,7 +19,7 @@ load_dotenv(ROOT / "backend" / ".env")
 
 from backend.core.config import COUNTRY_CODES  # noqa: E402
 from backend.data.parser import parse_energy_xml  # noqa: E402
-from pipeline.anomaly import STEP_LIMIT  # noqa: E402
+from pipeline.anomaly import STEP_LIMIT, step_limit  # noqa: E402
 
 ENTSOE_BASE_URL = "https://web-api.tp.entsoe.eu/api"
 CHUNK_DAYS = 30  # keep each request small; ENTSO-E limits very long ranges
@@ -86,10 +86,11 @@ def suspect_hours(quarter_hours: pd.Series, limit: float = STEP_LIMIT) -> pd.Dat
     return both_sides.unique().sort_values()
 
 
-def to_hourly(series_points: list) -> pd.Series:
+def to_hourly(series_points: list, limit: float = STEP_LIMIT) -> pd.Series:
     """Convert parser output ([{time, load_mw}, ...]) to a clean hourly UTC series.
 
-    The hours with implausible 15-minute jumps are kept in ``series.attrs["suspect_hours"]``.
+    The hours with implausible 15-minute jumps (steps above ``limit``) are kept in
+    ``series.attrs["suspect_hours"]``, the limit itself in ``series.attrs["step_limit"]``.
     """
     df = pd.DataFrame(series_points)
     if df.empty:
@@ -97,12 +98,13 @@ def to_hourly(series_points: list) -> pd.Series:
     df["time"] = pd.to_datetime(df["time"], utc=True)
     s = df.drop_duplicates("time").set_index("time")["load_mw"].astype(float).sort_index()
     s = s.replace(0.0, np.nan)  # a zero national load is a data glitch, not a real value
-    suspect = suspect_hours(s)
+    suspect = suspect_hours(s, limit)
     hourly = s.resample("1h").mean()
     hourly = hourly.interpolate(limit=3)  # fill short gaps only
     hourly = hourly.dropna()
     hourly.index.name = "ds"
     hourly.attrs["suspect_hours"] = suspect
+    hourly.attrs["step_limit"] = limit
     return hourly
 
 
@@ -130,7 +132,7 @@ def load_history(country: str, days: int = 90, process: str = "A16") -> pd.Serie
 
     if not points:
         raise HistoryError(f"no data returned for {country}")
-    return to_hourly([{"time": t, "load_mw": v} for t, v in points.items()])
+    return to_hourly([{"time": t, "load_mw": v} for t, v in points.items()], limit=step_limit(country))
 
 
 def load_tso_forecast(country: str, days: int = 90) -> pd.Series:

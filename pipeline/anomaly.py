@@ -33,6 +33,14 @@ SCALE_FLOOR = 0.003  # relative; stops a very quiet baseline from making everyth
 LEVEL_WINDOW = 25  # hours; centred rolling median that defines the local level of the errors
 STEP_LIMIT = 0.08  # a national load does not move by more than 8% within one quarter-hour
 SUSPECT_MARGIN = pd.Timedelta(hours=1)  # hours next to a suspect hour are held back too
+# Italy's load really does change in sharp steps in the early morning (03-05 UTC on about one day in
+# five, 18 of its 19 suspect hours in 90 days): its limit is higher, real glitches (a lone value of
+# 6 GW between 28 GW neighbours) are far above it.
+STEP_LIMITS = {"italy": 0.15}
+
+
+def step_limit(country: str) -> float:
+    return STEP_LIMITS.get(country, STEP_LIMIT)
 
 
 def _item(ts, residuals, rel, score) -> dict:
@@ -52,6 +60,7 @@ def robust_anomalies(
     threshold: float = THRESHOLD,
     min_baseline: int = MIN_BASELINE_HOURS,
     suspect=None,
+    step_limit: float = STEP_LIMIT,
 ) -> dict:
     """``residuals``: DataFrame indexed by UTC hour with columns ``actual`` and ``yhat``.
 
@@ -98,7 +107,7 @@ def robust_anomalies(
         "total_anomalies": len(items),
         "items": items,
         "data_quality": {
-            "step_limit_pct": round(STEP_LIMIT * 100, 1),
+            "step_limit_pct": round(step_limit * 100, 1),
             "suspect_hours": suspect_in_window,  # the hours with a jump; their neighbours are held back too
             "suppressed_items": suppressed,
         },

@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from pipeline.anomaly import robust_anomalies
+from pipeline.anomaly import STEP_LIMIT, robust_anomalies, step_limit
 from pipeline.history import suspect_hours, to_hourly
 
 
@@ -113,3 +113,23 @@ def test_a_steep_steady_ramp_is_not_a_jump_but_a_lone_spike_is():
 
     spike = [30000.0] * 6 + [6000.0] + [30000.0] * 6  # one dropped value
     assert hours(suspect_hours(quarter_series(spike))) == ["01:00"]  # the hour that holds the bad value
+
+
+def test_italy_has_a_higher_step_limit_than_the_default():
+    assert step_limit("italy") == 0.15
+    assert step_limit("germany") == STEP_LIMIT == 0.08
+
+
+def test_to_hourly_uses_and_records_the_limit_it_was_given():
+    series = quarter_series([65000] * 8 + [58000] * 8)  # one step of -11 %
+    points = [{"time": t.strftime("%Y-%m-%dT%H:%MZ"), "load_mw": v} for t, v in series.items()]
+    strict = to_hourly(points)
+    lenient = to_hourly(points, limit=0.15)
+    assert len(strict.attrs["suspect_hours"]) == 2 and strict.attrs["step_limit"] == STEP_LIMIT
+    assert len(lenient.attrs["suspect_hours"]) == 0 and lenient.attrs["step_limit"] == 0.15
+
+
+def test_the_reported_step_limit_follows_the_country():
+    out = robust_anomalies(residual_frame(), step_limit=0.15)
+    assert out["data_quality"]["step_limit_pct"] == 15.0
+    assert robust_anomalies(residual_frame())["data_quality"]["step_limit_pct"] == 8.0

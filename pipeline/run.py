@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pipeline.anomaly import robust_anomalies
+from pipeline.anomaly import STEP_LIMIT, robust_anomalies
 from pipeline.champion import (
     MARGIN,
     champion_residuals,
@@ -118,7 +118,11 @@ def build_country_entry(country: str, series: pd.Series, candidates, n_origins: 
             "upper_pct": round(float(q_hi) * 100, 2),
         },
         "predictions": predictions,
-        "anomalies": robust_anomalies(residuals, suspect=series.attrs.get("suspect_hours")),
+        "anomalies": robust_anomalies(
+            residuals,
+            suspect=series.attrs.get("suspect_hours"),
+            step_limit=series.attrs.get("step_limit", STEP_LIMIT),
+        ),
         "track_record": track_record,
     }
 
