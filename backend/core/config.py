@@ -6,6 +6,8 @@ COUNTRY_CODES = {
     "france": "10YFR-RTE------C",
     "spain": "10YES-REE------0",
     "poland": "10YPL-AREA-----S",
+    "italy": "10YIT-GRTN-----B",
+    "belgium": "10YBE----------2",
 }
 
 CITY_COORDS = {

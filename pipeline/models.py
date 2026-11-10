@@ -23,6 +23,8 @@ COUNTRY_TZ = {
     "france": "Europe/Paris",
     "spain": "Europe/Madrid",
     "poland": "Europe/Warsaw",
+    "italy": "Europe/Rome",
+    "belgium": "Europe/Brussels",
 }
 LEVEL_HOURS = 24 * 7  # window used to measure the current load level
 LEVEL_CLIP = (0.9, 1.1)  # never rescale by more than +-10%

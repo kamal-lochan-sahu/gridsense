@@ -37,12 +37,12 @@ def test_energy_returns_all_countries_and_is_cached(energy_calls):
     first = client.get("/energy")
     assert first.status_code == 200
     body = first.json()
-    assert sorted(item["country"] for item in body) == ["France", "Germany", "Poland", "Spain"]
+    assert sorted(item["country"] for item in body) == ["Belgium", "France", "Germany", "Italy", "Poland", "Spain"]
     assert all(item["status"] == "success" and item["series"] and item["stale"] is False for item in body)
-    assert len(energy_calls) == 4
+    assert len(energy_calls) == 6
 
     assert client.get("/energy").status_code == 200
-    assert len(energy_calls) == 4  # second request served from cache
+    assert len(energy_calls) == 6  # second request served from cache
 
 
 def test_anomaly_reuses_cached_energy(energy_calls):
@@ -50,7 +50,7 @@ def test_anomaly_reuses_cached_energy(energy_calls):
     response = client.get("/anomaly/germany")
     assert response.status_code == 200
     assert response.json()["country"] == "Germany"
-    assert len(energy_calls) == 4  # no extra ENTSO-E call
+    assert len(energy_calls) == 6  # no extra ENTSO-E call
 
 
 def test_energy_skips_failing_country(monkeypatch, energy_xml):
@@ -62,7 +62,7 @@ def test_energy_skips_failing_country(monkeypatch, energy_xml):
     monkeypatch.setattr(fetcher, "fetch_energy_xml", fake_fetch)
     response = client.get("/energy")
     assert response.status_code == 200
-    assert sorted(item["country"] for item in response.json()) == ["Germany", "Poland", "Spain"]
+    assert sorted(item["country"] for item in response.json()) == ["Belgium", "Germany", "Italy", "Poland", "Spain"]
 
 
 def test_energy_all_failing_is_502(monkeypatch):

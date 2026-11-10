@@ -10,7 +10,7 @@ from functools import lru_cache
 
 import holidays
 
-ISO = {"germany": "DE", "france": "FR", "spain": "ES", "poland": "PL"}
+ISO = {"germany": "DE", "france": "FR", "spain": "ES", "poland": "PL", "italy": "IT", "belgium": "BE"}
 
 
 @lru_cache(maxsize=None)

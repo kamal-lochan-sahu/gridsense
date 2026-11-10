@@ -57,8 +57,11 @@ def _fetch_chunk(country_code: str, start: datetime, end: datetime, token: str, 
 def suspect_hours(quarter_hours: pd.Series, limit: float = STEP_LIMIT) -> pd.DatetimeIndex:
     """UTC hours touched by an implausible jump between two consecutive 15-minute values.
 
-    Both sides of a jump count (the hour of the earlier and of the later value). Series that are
-    not in 15-minute steps are not checked: their steps are naturally larger.
+    Both sides of a jump count (the hour of the earlier and of the later value). Steep but steady
+    ramps are not jumps: a big step is only a jump when the steps right before and after it are
+    not big steps in the same direction (Italy's morning ramp has several +8% quarter-hours in a
+    row, a source glitch such as 65.5 -> 52.8 GW stands alone). Series that are not in 15-minute
+    steps are not checked: their steps are naturally larger.
     """
     empty = pd.DatetimeIndex([], tz="UTC")
     if len(quarter_hours) < 2:
@@ -67,8 +70,16 @@ def suspect_hours(quarter_hours: pd.Series, limit: float = STEP_LIMIT) -> pd.Dat
         return empty
     grid = quarter_hours.asfreq("15min")
     previous = grid.shift(1)
-    step = (grid - previous).abs() / ((grid + previous) / 2)
-    jumps = step.index[(step > limit).to_numpy()]
+    step = (grid - previous) / ((grid + previous) / 2)  # signed change into each value
+    size = step.abs()
+    before, after = step.shift(1), step.shift(-1)  # the steps into the previous value and out of this one
+    ramp = (
+        (np.sign(before) == np.sign(step))
+        & (np.sign(after) == np.sign(step))
+        & (before.abs() >= size / 2)
+        & (after.abs() >= size / 2)
+    )
+    jumps = step.index[((size > limit) & ~ramp).to_numpy()]
     if len(jumps) == 0:
         return empty
     both_sides = jumps.floor("h").append((jumps - pd.Timedelta(minutes=15)).floor("h"))

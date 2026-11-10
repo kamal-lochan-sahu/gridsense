@@ -25,7 +25,7 @@ import type {
 } from "@/lib/types";
 
 const REFRESH_INTERVAL = 5 * 60 * 1000;
-const EXPECTED_COUNTRIES = ["Germany", "France", "Spain", "Poland"];
+const EXPECTED_COUNTRIES = ["Germany", "France", "Spain", "Poland", "Italy", "Belgium"];
 const OVERVIEW_COUNTRIES = EXPECTED_COUNTRIES.map((c) => c.toLowerCase());
 
 const TOOLTIP_STYLE = {

@@ -82,7 +82,7 @@ All numbers are average absolute percentage errors on real ENTSO-E data, autumn 
 
 ## 8. Known limitations
 
-- Nationwide load only, four countries, hourly, 24 h ahead.
+- Nationwide load only, six countries, hourly, 24 h ahead (the accuracy numbers above were measured on the first four).
 - No regional holidays or bridge days; some TSOs know them, GridSense does not.
 - Coarse temperature (five cities); no wind, cloud or solar information.
 - Tests use measured temperatures; no archived weather forecasts yet.

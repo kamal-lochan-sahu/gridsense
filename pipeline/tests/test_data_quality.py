@@ -101,3 +101,15 @@ def test_the_hour_on_each_side_of_a_suspect_hour_is_held_back_too():
     assert [i["time"] for i in out["items"]] == [stamp(df.index[-1])]
     assert [i["time"] for i in out["data_quality"]["suppressed_items"]] == [stamp(t) for t in df.index[-6:-3]]
     assert out["data_quality"]["suspect_hours"] == [stamp(df.index[-5])]  # only the hour with the jump is listed
+
+
+def test_a_steep_steady_ramp_is_not_a_jump_but_a_lone_spike_is():
+    factors = [1.03, 1.06, 1.09, 1.09, 1.09, 1.06, 1.03]  # Italy-like morning ramp, up to +9% per quarter-hour
+    ramp = [20000.0] * 4
+    for factor in factors:
+        ramp.append(ramp[-1] * factor)
+    ramp += [ramp[-1]] * 4
+    assert len(suspect_hours(quarter_series(ramp))) == 0
+
+    spike = [30000.0] * 6 + [6000.0] + [30000.0] * 6  # one dropped value
+    assert hours(suspect_hours(quarter_series(spike))) == ["01:00"]  # the hour that holds the bad value

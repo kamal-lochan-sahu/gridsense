@@ -21,7 +21,7 @@ DEFAULT_URL = (
     "https://github.com/kamal-lochan-sahu/gridsense/releases/download/forecast-data/forecast.json"
 )
 README = Path(__file__).resolve().parent.parent / "README.md"
-ORDER = ("germany", "france", "spain", "poland")
+ORDER = ("germany", "france", "spain", "poland", "italy", "belgium")
 MONTHS = (
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",

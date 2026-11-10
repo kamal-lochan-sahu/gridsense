@@ -13,7 +13,7 @@
 
 ## What it does
 
-GridSense pulls official actual-load data from the [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) for **Germany, France, Spain and Poland** and shows it next to local weather, a forecast, an anomaly check and a track record.
+GridSense pulls official actual-load data from the [ENTSO-E Transparency Platform](https://transparency.entsoe.eu/) for **Germany, France, Spain, Poland, Italy and Belgium** and shows it next to local weather, a forecast, an anomaly check and a track record.
 
 - **Load chart per country**: the last 24 hours in 15-minute steps with real timestamps in your local time, plus max / average / min.
 - **24-hour forecast with an 80% interval** for every country. A scheduled pipeline re-selects the best of 16 candidate models for each country every 3 hours; the dashboard names the model in use and how accurate it was in testing.
@@ -222,7 +222,7 @@ None of the test suites need network access or an API key. CI runs all three on 
 
 ## Limitations
 
-- Four countries, hourly resolution, a 24-hour horizon.
+- Six countries, hourly resolution, a 24-hour horizon.
 - Public holidays are national ones; regional holidays and bridge days are not modelled (the worst single miss in testing, Spain on 9 October, fell on a regional holiday, possibly related).
 - Temperature is a population-weighted average of five cities per country, which is much coarser than the weather data a TSO uses.
 - Forecast accuracy is tested on measured, not forecast, temperatures; see [How good is the forecast?](#how-good-is-the-forecast).
