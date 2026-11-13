@@ -27,7 +27,7 @@ ENTSO-E publishes load data with a delay of roughly one hour, so the newest poin
 
 ## How good is the forecast?
 
-Honestly: about on par with the grid operator in Germany (the lead changes from week to week), clearly behind the operators in France, Spain and Poland, and usually (not always) better than simply copying last week.
+Honestly: close to the grid operator in Germany and Poland (the lead changes from week to week), clearly behind the operators in France and Spain, and usually (not always) better than simply copying last week. Italy and Belgium were added in November 2026, so the table has only one week for them (behind the operator in Italy, ahead of it in Belgium): too little to say more.
 
 <!-- snapshot:start -->
 Snapshot, average error over the 7 days to 9 November 2026 (lower is better, generated from the published `forecast.json`):
